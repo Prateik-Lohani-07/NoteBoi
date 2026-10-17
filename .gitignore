@@ -1,0 +1,7 @@
+node_modules/
+dist/
+main.js
+data.json
+*.log
+.env
+.env.*

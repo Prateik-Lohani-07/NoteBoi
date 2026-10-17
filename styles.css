@@ -1,0 +1,14 @@
+.graph-recall { display: flex; flex-direction: column; height: 100%; padding: 8px; gap: 8px; }
+.gr-log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.gr-hint { color: var(--text-muted); font-size: var(--font-ui-small); }
+.gr-msg { padding: 8px 10px; border-radius: 8px; }
+.gr-user { background: var(--background-modifier-hover); align-self: flex-end; max-width: 90%; }
+.gr-assistant { background: var(--background-secondary); }
+.gr-graph-wrap { margin-top: 8px; }
+.gr-graph-wrap summary { cursor: pointer; color: var(--text-muted); font-size: var(--font-ui-small); }
+.gr-legend { font-size: 11px; margin: 4px 0; display: flex; gap: 10px; flex-wrap: wrap; }
+.gr-graph { height: 320px; width: 100%; background: var(--background-primary); border-radius: 6px; }
+.gr-input { display: flex; gap: 6px; align-items: flex-end; }
+.gr-input textarea { flex: 1; resize: none; }
+.gr-buttons { display: flex; flex-direction: column; gap: 4px; }
+.gr-recording { background: var(--color-red) !important; }

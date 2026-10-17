@@ -1,0 +1,9 @@
+{
+  "id": "graph-recall",
+  "name": "Graph Recall",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Ask your vault questions. GraphRAG over your notes, powered by Neo4j, with a visual answer subgraph.",
+  "author": "Prateik Lohani",
+  "isDesktopOnly": true
+}

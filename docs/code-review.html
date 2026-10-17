@@ -1,0 +1,1412 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Graph Recall: code review guide</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--line:#262b36;--text:#e5e7eb;--mut:#9ca3af;--blue:#4c8bf5;--amber:#f59e0b;--green:#10b981}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 system-ui,sans-serif;display:flex}
+nav{position:sticky;top:0;height:100vh;width:230px;flex:none;padding:18px;border-right:1px solid var(--line);overflow:auto}
+nav b{display:block;margin-bottom:10px}nav a{display:block;color:var(--mut);text-decoration:none;padding:4px 0;font:13px ui-monospace,monospace}nav a:hover{color:var(--text)}
+main{max-width:980px;padding:28px 36px;flex:1;min-width:0}
+h1{margin:0 0 6px}h2{margin:0;font:600 18px ui-monospace,monospace}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:18px 0}
+.head{display:flex;align-items:center;gap:10px}.num{background:var(--blue);color:#fff;border-radius:50%;width:24px;height:24px;display:grid;place-items:center;font-size:13px}
+.lines{color:var(--mut);font-size:12px;margin-left:auto}.role{color:var(--amber);margin:6px 0 2px;font-weight:600}
+.box{border-left:3px solid;padding:6px 12px;margin:10px 0;background:#0d0f14;border-radius:0 6px 6px 0}.box h4{margin:0 0 4px;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+.box ul{margin:0;padding-left:18px}.box li{margin:3px 0}
+.focus{border-color:var(--blue)}.focus h4{color:var(--blue)}.say{border-color:var(--green)}.say h4{color:var(--green)}.watch{border-color:var(--amber)}.watch h4{color:var(--amber)}
+.focus a{color:var(--blue);font-family:ui-monospace,monospace}
+details{margin-top:10px}summary{cursor:pointer;color:var(--mut)}
+pre{margin:8px 0 0;background:#0a0c10;border:1px solid var(--line);border-radius:8px;overflow:auto;max-height:560px}
+code{font:12.5px/1.5 ui-monospace,monospace;display:block;padding:8px 0}
+code span{display:block;padding-right:12px;white-space:pre}code span i{display:inline-block;width:44px;text-align:right;margin-right:12px;color:#4b5563;font-style:normal;user-select:none}
+code span.hot{background:rgba(76,139,245,.14);box-shadow:inset 3px 0 var(--blue)}code span:target{background:rgba(245,158,11,.25)}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}.flow span{background:#0d0f14;border:1px solid var(--line);border-radius:6px;padding:6px 10px;font:13px ui-monospace,monospace}.flow em{color:var(--mut);font-style:normal}
+.warn{border:1px solid var(--amber);background:rgba(245,158,11,.08);padding:10px 14px;border-radius:8px}
+table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;font-size:14px}
+</style></head><body>
+<nav><b>Review order</b><a href="#src-retrieve-ts">1. src/retrieve.ts</a><a href="#src-ingest-ts">2. src/ingest.ts</a><a href="#src-neo4j-ts">3. src/neo4j.ts</a><a href="#src-chatView-ts">4. src/chatView.ts</a><a href="#src-llm-ts">5. src/llm.ts</a><a href="#src-settings-ts">6. src/settings.ts</a><a href="#main-ts">7. main.ts</a><a href="#src-graphView-ts">8. src/graphView.ts</a><a href="#src-voice-ts">9. src/voice.ts</a><b style="margin-top:14px">Other</b><a href="#config">config files</a></nav>
+<main>
+<h1>Graph Recall: code review guide</h1>
+<p style="color:var(--mut)">Obsidian plugin: GraphRAG over your vault on Neo4j. Generated from the live source. Files are ordered by how much they matter to the demo.</p>
+
+<div class="warn"><b>Status:</b> the code type-checks and bundles, but it has <b>not been run</b> against a live Neo4j, Ollama or Obsidian yet. Treat the Cypher and the Electron behaviours as unverified until the end-to-end test.</div>
+
+<div class="card"><h2>How it works</h2>
+<p><b>Index time</b></p>
+<div class="flow"><span>.md note</span><em>→</em><span>chunk by heading</span><em>→</em><span>embed</span><em>→</em><span>LLM extracts concepts</span><em>→</em><span>Neo4j graph</span></div>
+<p><b>Question time</b></p>
+<div class="flow"><span>question</span><em>→</em><span>vector + fulltext</span><em>→</em><span>RRF → seed chunks</span><em>→</em><span>Cypher expansion via concepts</span><em>→</em><span>LLM answers with citations</span><em>→</em><span>subgraph drawn</span></div>
+<table><tr><th>Node</th><th>Meaning</th></tr>
+<tr><td>Note</td><td>A markdown file; LINKS_TO from [[wikilinks]], TAGGED from tags</td></tr>
+<tr><td>Chunk</td><td>A heading-bounded piece of text with an embedding; NEXT gives reading order</td></tr>
+<tr><td>Concept</td><td>An LLM-extracted idea; MENTIONS from chunks; RELATED_TO between co-occurring concepts</td></tr></table></div>
+
+<div class="card"><h2>Where to spend your review time</h2><ol>
+<li><b>src/retrieve.ts</b>: the expansion query and the "concepts connecting 2+ chunks" rule are the story you tell.</li>
+<li><b>src/ingest.ts</b>: chunking, the serial write queue, and the single UNWIND write.</li>
+<li><b>src/neo4j.ts</b>: how the schema survives an embedding-model switch.</li>
+<li>Skim the rest. They are plumbing.</li></ol>
+<p><b>Suggested demo question:</b> pick one whose answer spans two notes (or two headings) that never share keywords but share a concept. The amber node in the graph is your proof that GraphRAG did something plain RAG would not.</p></div>
+
+
+<section id="src-retrieve-ts" class="card">
+  <div class="head"><span class="num">1</span><h2>src/retrieve.ts</h2><span class="lines">184 lines</span></div>
+  <p class="role">The GraphRAG core. This is what you demo.</p>
+  <p>Takes a question and returns (a) passages for the LLM and (b) the subgraph for the visualization. Everything Neo4j-specific that judges care about lives here.</p>
+  <div class="box focus"><h4>Focus here</h4><ul><li><a href="#src-retrieve-ts-L51">L51</a> Vector search: native Neo4j vector index, top 10 chunks by cosine similarity.</li><li><a href="#src-retrieve-ts-L58">L58</a> Keyword search on the fulltext index. Catches exact terms embeddings blur (names, acronyms).</li><li><a href="#src-retrieve-ts-L64">L64</a> Reciprocal Rank Fusion merges the two rankings: score = sum of 1/(60+rank). Hybrid search without tuning weights.</li><li><a href="#src-retrieve-ts-L75">L75</a> THE GraphRAG step. From the seed chunks, walk (Chunk)-[:MENTIONS]-&gt;(Concept)&lt;-[:MENTIONS]-(Chunk) to pull in related chunks that never matched the query text. Ranked by number of shared concepts. These become the amber nodes.</li><li><a href="#src-retrieve-ts-L90">L90</a> Sequential neighbours: adds surrounding context from the same note.</li><li><a href="#src-retrieve-ts-L147">L147</a> Visualization rule: a concept node is drawn only if it links 2+ retrieved chunks. Those are exactly the connections the graph contributed, and it keeps the picture readable.</li><li><a href="#src-retrieve-ts-L169">L169</a> Grounding prompt: answer only from the notes, cite with the exact [[wikilink#heading]], say so if the answer isn't there. Each expanded passage is annotated with the concepts it was reached through.</li></ul></div>
+  <div class="box say"><h4>Say this when explaining</h4><ul><li>Plain RAG stops at top-k similarity. Here the blue nodes are similarity hits and the amber nodes were found by walking the graph through shared concepts, so I can show where the graph changed the answer.</li><li>Hybrid retrieval (vector + fulltext) is fused with RRF in application code, then expanded with Cypher.</li><li>The viz isn't decoration: it's the exact subgraph the model was given.</li></ul></div>
+  <div class="box watch"><h4>Honest caveats</h4><ul><li>Concept quality depends on the LLM that extracted them. With a small local model, expansion can be noisy.</li><li>Vector index population is asynchronous in Neo4j. Right after the first index, queries can fail until the index is ONLINE.</li><li>Not yet run against a real database. The Cypher is untested.</li></ul></div>
+  <details><summary>Full source</summary><pre><code><span id="src-retrieve-ts-L1"><i>1</i>import type { Graph } from "./neo4j";</span>
+<span id="src-retrieve-ts-L2"><i>2</i>import type { Llm } from "./llm";</span>
+<span id="src-retrieve-ts-L3"><i>3</i> </span>
+<span id="src-retrieve-ts-L4"><i>4</i>export interface Passage {</span>
+<span id="src-retrieve-ts-L5"><i>5</i>  id: string;</span>
+<span id="src-retrieve-ts-L6"><i>6</i>  path: string;</span>
+<span id="src-retrieve-ts-L7"><i>7</i>  title: string;</span>
+<span id="src-retrieve-ts-L8"><i>8</i>  heading: string;</span>
+<span id="src-retrieve-ts-L9"><i>9</i>  text: string;</span>
+<span id="src-retrieve-ts-L10"><i>10</i>  role: "seed" | "expanded";</span>
+<span id="src-retrieve-ts-L11"><i>11</i>  via: string[];</span>
+<span id="src-retrieve-ts-L12"><i>12</i>}</span>
+<span id="src-retrieve-ts-L13"><i>13</i> </span>
+<span id="src-retrieve-ts-L14"><i>14</i>export interface VizNode {</span>
+<span id="src-retrieve-ts-L15"><i>15</i>  id: string;</span>
+<span id="src-retrieve-ts-L16"><i>16</i>  label: string;</span>
+<span id="src-retrieve-ts-L17"><i>17</i>  kind: "chunk" | "note" | "concept";</span>
+<span id="src-retrieve-ts-L18"><i>18</i>  role: "seed" | "expanded" | "context";</span>
+<span id="src-retrieve-ts-L19"><i>19</i>  path?: string;</span>
+<span id="src-retrieve-ts-L20"><i>20</i>  heading?: string;</span>
+<span id="src-retrieve-ts-L21"><i>21</i>}</span>
+<span id="src-retrieve-ts-L22"><i>22</i> </span>
+<span id="src-retrieve-ts-L23"><i>23</i>export interface VizEdge {</span>
+<span id="src-retrieve-ts-L24"><i>24</i>  source: string;</span>
+<span id="src-retrieve-ts-L25"><i>25</i>  target: string;</span>
+<span id="src-retrieve-ts-L26"><i>26</i>  type: string;</span>
+<span id="src-retrieve-ts-L27"><i>27</i>}</span>
+<span id="src-retrieve-ts-L28"><i>28</i> </span>
+<span id="src-retrieve-ts-L29"><i>29</i>export interface Retrieval {</span>
+<span id="src-retrieve-ts-L30"><i>30</i>  passages: Passage[];</span>
+<span id="src-retrieve-ts-L31"><i>31</i>  nodes: VizNode[];</span>
+<span id="src-retrieve-ts-L32"><i>32</i>  edges: VizEdge[];</span>
+<span id="src-retrieve-ts-L33"><i>33</i>}</span>
+<span id="src-retrieve-ts-L34"><i>34</i> </span>
+<span id="src-retrieve-ts-L35"><i>35</i>const SEEDS = 5;</span>
+<span id="src-retrieve-ts-L36"><i>36</i>const EXPANDED = 4;</span>
+<span id="src-retrieve-ts-L37"><i>37</i>const STOP = new Set(["the", "and", "what", "which", "that", "this", "with", "from", "have", "does", "about", "how", "why", "when", "who", "are", "was", "were", "for", "you", "can", "tell", "know"]);</span>
+<span id="src-retrieve-ts-L38"><i>38</i> </span>
+<span id="src-retrieve-ts-L39"><i>39</i>function lucene(question: string): string {</span>
+<span id="src-retrieve-ts-L40"><i>40</i>  const words = question</span>
+<span id="src-retrieve-ts-L41"><i>41</i>    .toLowerCase()</span>
+<span id="src-retrieve-ts-L42"><i>42</i>    .split(/[^\p{L}\p{N}]+/u)</span>
+<span id="src-retrieve-ts-L43"><i>43</i>    .filter((w) =&gt; w.length &gt; 2 &amp;&amp; !STOP.has(w));</span>
+<span id="src-retrieve-ts-L44"><i>44</i>  return [...new Set(words)].slice(0, 12).join(" OR ");</span>
+<span id="src-retrieve-ts-L45"><i>45</i>}</span>
+<span id="src-retrieve-ts-L46"><i>46</i> </span>
+<span id="src-retrieve-ts-L47"><i>47</i>export async function retrieve(graph: Graph, llm: Llm, question: string): Promise&lt;Retrieval&gt; {</span>
+<span id="src-retrieve-ts-L48"><i>48</i>  const [vec] = await llm.embed([question]);</span>
+<span id="src-retrieve-ts-L49"><i>49</i> </span>
+<span id="src-retrieve-ts-L50"><i>50</i>  const vecRows = await graph.run(</span>
+<span id="src-retrieve-ts-L51" class="hot"><i>51</i>    `CALL db.index.vector.queryNodes('chunk_embedding', 10, $vec) YIELD node, score</span>
+<span id="src-retrieve-ts-L52" class="hot"><i>52</i>     RETURN node.id AS id, score`,</span>
+<span id="src-retrieve-ts-L53" class="hot"><i>53</i>    { vec },</span>
+<span id="src-retrieve-ts-L54" class="hot"><i>54</i>  );</span>
+<span id="src-retrieve-ts-L55"><i>55</i>  const q = lucene(question);</span>
+<span id="src-retrieve-ts-L56"><i>56</i>  const ftRows = q</span>
+<span id="src-retrieve-ts-L57"><i>57</i>    ? await graph.run(</span>
+<span id="src-retrieve-ts-L58" class="hot"><i>58</i>        `CALL db.index.fulltext.queryNodes('chunk_text', $q) YIELD node, score</span>
+<span id="src-retrieve-ts-L59" class="hot"><i>59</i>         RETURN node.id AS id, score LIMIT 10`,</span>
+<span id="src-retrieve-ts-L60" class="hot"><i>60</i>        { q },</span>
+<span id="src-retrieve-ts-L61" class="hot"><i>61</i>      )</span>
+<span id="src-retrieve-ts-L62"><i>62</i>    : [];</span>
+<span id="src-retrieve-ts-L63"><i>63</i> </span>
+<span id="src-retrieve-ts-L64" class="hot"><i>64</i>  // reciprocal rank fusion of the vector and keyword rankings</span>
+<span id="src-retrieve-ts-L65" class="hot"><i>65</i>  const fused = new Map&lt;string, number&gt;();</span>
+<span id="src-retrieve-ts-L66" class="hot"><i>66</i>  for (const rows of [vecRows, ftRows]) {</span>
+<span id="src-retrieve-ts-L67" class="hot"><i>67</i>    rows.forEach((r, rank) =&gt; {</span>
+<span id="src-retrieve-ts-L68" class="hot"><i>68</i>      const id = r.get("id") as string;</span>
+<span id="src-retrieve-ts-L69" class="hot"><i>69</i>      fused.set(id, (fused.get(id) ?? 0) + 1 / (60 + rank));</span>
+<span id="src-retrieve-ts-L70" class="hot"><i>70</i>    });</span>
+<span id="src-retrieve-ts-L71"><i>71</i>  }</span>
+<span id="src-retrieve-ts-L72"><i>72</i>  const seedIds = [...fused.entries()].sort((a, b) =&gt; b[1] - a[1]).slice(0, SEEDS).map(([id]) =&gt; id);</span>
+<span id="src-retrieve-ts-L73"><i>73</i>  if (seedIds.length === 0) return { passages: [], nodes: [], edges: [] };</span>
+<span id="src-retrieve-ts-L74"><i>74</i> </span>
+<span id="src-retrieve-ts-L75" class="hot"><i>75</i>  // graph expansion: chunks sharing concepts with the seeds, ranked by overlap</span>
+<span id="src-retrieve-ts-L76" class="hot"><i>76</i>  const viaConcept = await graph.run(</span>
+<span id="src-retrieve-ts-L77" class="hot"><i>77</i>    `MATCH (c:Chunk) WHERE c.id IN $ids</span>
+<span id="src-retrieve-ts-L78" class="hot"><i>78</i>     MATCH (c)-[:MENTIONS]-&gt;(k:Concept)&lt;-[:MENTIONS]-(o:Chunk)</span>
+<span id="src-retrieve-ts-L79" class="hot"><i>79</i>     WHERE NOT o.id IN $ids</span>
+<span id="src-retrieve-ts-L80" class="hot"><i>80</i>     WITH o, collect(DISTINCT k.name) AS via, count(DISTINCT k) AS shared</span>
+<span id="src-retrieve-ts-L81" class="hot"><i>81</i>     ORDER BY shared DESC LIMIT ${EXPANDED}</span>
+<span id="src-retrieve-ts-L82" class="hot"><i>82</i>     RETURN o.id AS id, via`,</span>
+<span id="src-retrieve-ts-L83"><i>83</i>    { ids: seedIds },</span>
+<span id="src-retrieve-ts-L84"><i>84</i>  );</span>
+<span id="src-retrieve-ts-L85"><i>85</i>  const viaMap = new Map&lt;string, string[]&gt;(viaConcept.map((r) =&gt; [r.get("id") as string, r.get("via") as string[]]));</span>
+<span id="src-retrieve-ts-L86"><i>86</i> </span>
+<span id="src-retrieve-ts-L87"><i>87</i>  // plus sequential neighbours, for surrounding context</span>
+<span id="src-retrieve-ts-L88"><i>88</i>  const neighbours = await graph.run(</span>
+<span id="src-retrieve-ts-L89"><i>89</i>    `MATCH (c:Chunk) WHERE c.id IN $ids</span>
+<span id="src-retrieve-ts-L90" class="hot"><i>90</i>     MATCH (c)-[:NEXT]-(o:Chunk) WHERE NOT o.id IN $ids</span>
+<span id="src-retrieve-ts-L91" class="hot"><i>91</i>     RETURN DISTINCT o.id AS id LIMIT 3`,</span>
+<span id="src-retrieve-ts-L92" class="hot"><i>92</i>    { ids: seedIds },</span>
+<span id="src-retrieve-ts-L93"><i>93</i>  );</span>
+<span id="src-retrieve-ts-L94"><i>94</i>  for (const r of neighbours) if (!viaMap.has(r.get("id") as string)) viaMap.set(r.get("id") as string, []);</span>
+<span id="src-retrieve-ts-L95"><i>95</i> </span>
+<span id="src-retrieve-ts-L96"><i>96</i>  const expandedIds = [...viaMap.keys()];</span>
+<span id="src-retrieve-ts-L97"><i>97</i>  const allIds = [...seedIds, ...expandedIds];</span>
+<span id="src-retrieve-ts-L98"><i>98</i> </span>
+<span id="src-retrieve-ts-L99"><i>99</i>  const rows = await graph.run(</span>
+<span id="src-retrieve-ts-L100"><i>100</i>    `MATCH (n:Note)-[:HAS_CHUNK]-&gt;(c:Chunk) WHERE c.id IN $all</span>
+<span id="src-retrieve-ts-L101"><i>101</i>     OPTIONAL MATCH (c)-[:MENTIONS]-&gt;(k:Concept)</span>
+<span id="src-retrieve-ts-L102"><i>102</i>     RETURN c.id AS id, c.text AS text, c.heading AS heading, n.path AS path, n.title AS title,</span>
+<span id="src-retrieve-ts-L103"><i>103</i>            collect(DISTINCT k.name) AS concepts`,</span>
+<span id="src-retrieve-ts-L104"><i>104</i>    { all: allIds },</span>
+<span id="src-retrieve-ts-L105"><i>105</i>  );</span>
+<span id="src-retrieve-ts-L106"><i>106</i>  const byId = new Map(rows.map((r) =&gt; [r.get("id") as string, r]));</span>
+<span id="src-retrieve-ts-L107"><i>107</i> </span>
+<span id="src-retrieve-ts-L108"><i>108</i>  const passages: Passage[] = [];</span>
+<span id="src-retrieve-ts-L109"><i>109</i>  for (const id of allIds) {</span>
+<span id="src-retrieve-ts-L110"><i>110</i>    const r = byId.get(id);</span>
+<span id="src-retrieve-ts-L111"><i>111</i>    if (!r) continue;</span>
+<span id="src-retrieve-ts-L112"><i>112</i>    passages.push({</span>
+<span id="src-retrieve-ts-L113"><i>113</i>      id,</span>
+<span id="src-retrieve-ts-L114"><i>114</i>      path: r.get("path"),</span>
+<span id="src-retrieve-ts-L115"><i>115</i>      title: r.get("title"),</span>
+<span id="src-retrieve-ts-L116"><i>116</i>      heading: r.get("heading") ?? "",</span>
+<span id="src-retrieve-ts-L117"><i>117</i>      text: r.get("text"),</span>
+<span id="src-retrieve-ts-L118"><i>118</i>      role: seedIds.includes(id) ? "seed" : "expanded",</span>
+<span id="src-retrieve-ts-L119"><i>119</i>      via: viaMap.get(id) ?? [],</span>
+<span id="src-retrieve-ts-L120"><i>120</i>    });</span>
+<span id="src-retrieve-ts-L121"><i>121</i>  }</span>
+<span id="src-retrieve-ts-L122"><i>122</i> </span>
+<span id="src-retrieve-ts-L123"><i>123</i>  // ---- build the visualised subgraph ----</span>
+<span id="src-retrieve-ts-L124"><i>124</i>  const nodes: VizNode[] = [];</span>
+<span id="src-retrieve-ts-L125"><i>125</i>  const edges: VizEdge[] = [];</span>
+<span id="src-retrieve-ts-L126"><i>126</i>  const noteIds = new Map&lt;string, string&gt;();</span>
+<span id="src-retrieve-ts-L127"><i>127</i>  const conceptCount = new Map&lt;string, string[]&gt;();</span>
+<span id="src-retrieve-ts-L128"><i>128</i> </span>
+<span id="src-retrieve-ts-L129"><i>129</i>  for (const p of passages) {</span>
+<span id="src-retrieve-ts-L130"><i>130</i>    nodes.push({</span>
+<span id="src-retrieve-ts-L131"><i>131</i>      id: p.id,</span>
+<span id="src-retrieve-ts-L132"><i>132</i>      label: p.heading || p.title,</span>
+<span id="src-retrieve-ts-L133"><i>133</i>      kind: "chunk",</span>
+<span id="src-retrieve-ts-L134"><i>134</i>      role: p.role,</span>
+<span id="src-retrieve-ts-L135"><i>135</i>      path: p.path,</span>
+<span id="src-retrieve-ts-L136"><i>136</i>      heading: p.heading,</span>
+<span id="src-retrieve-ts-L137"><i>137</i>    });</span>
+<span id="src-retrieve-ts-L138"><i>138</i>    if (!noteIds.has(p.path)) {</span>
+<span id="src-retrieve-ts-L139"><i>139</i>      noteIds.set(p.path, `note:${p.path}`);</span>
+<span id="src-retrieve-ts-L140"><i>140</i>      nodes.push({ id: `note:${p.path}`, label: p.title, kind: "note", role: "context", path: p.path });</span>
+<span id="src-retrieve-ts-L141"><i>141</i>    }</span>
+<span id="src-retrieve-ts-L142"><i>142</i>    edges.push({ source: `note:${p.path}`, target: p.id, type: "HAS_CHUNK" });</span>
+<span id="src-retrieve-ts-L143"><i>143</i>    for (const k of (byId.get(p.id)!.get("concepts") as string[]) ?? []) {</span>
+<span id="src-retrieve-ts-L144"><i>144</i>      conceptCount.set(k, [...(conceptCount.get(k) ?? []), p.id]);</span>
+<span id="src-retrieve-ts-L145"><i>145</i>    }</span>
+<span id="src-retrieve-ts-L146"><i>146</i>  }</span>
+<span id="src-retrieve-ts-L147" class="hot"><i>147</i>  // only show concepts that connect at least two retrieved chunks: those are what made the graph useful</span>
+<span id="src-retrieve-ts-L148" class="hot"><i>148</i>  for (const [k, chunkIds] of conceptCount) {</span>
+<span id="src-retrieve-ts-L149" class="hot"><i>149</i>    if (chunkIds.length &lt; 2) continue;</span>
+<span id="src-retrieve-ts-L150" class="hot"><i>150</i>    nodes.push({ id: `concept:${k}`, label: k, kind: "concept", role: "context" });</span>
+<span id="src-retrieve-ts-L151" class="hot"><i>151</i>    for (const id of chunkIds) edges.push({ source: id, target: `concept:${k}`, type: "MENTIONS" });</span>
+<span id="src-retrieve-ts-L152"><i>152</i>  }</span>
+<span id="src-retrieve-ts-L153"><i>153</i> </span>
+<span id="src-retrieve-ts-L154"><i>154</i>  const next = await graph.run(</span>
+<span id="src-retrieve-ts-L155"><i>155</i>    "MATCH (a:Chunk)-[:NEXT]-&gt;(b:Chunk) WHERE a.id IN $all AND b.id IN $all RETURN a.id AS a, b.id AS b",</span>
+<span id="src-retrieve-ts-L156"><i>156</i>    { all: allIds },</span>
+<span id="src-retrieve-ts-L157"><i>157</i>  );</span>
+<span id="src-retrieve-ts-L158"><i>158</i>  for (const r of next) edges.push({ source: r.get("a"), target: r.get("b"), type: "NEXT" });</span>
+<span id="src-retrieve-ts-L159"><i>159</i> </span>
+<span id="src-retrieve-ts-L160"><i>160</i>  const links = await graph.run(</span>
+<span id="src-retrieve-ts-L161"><i>161</i>    "MATCH (a:Note)-[:LINKS_TO]-&gt;(b:Note) WHERE a.path IN $paths AND b.path IN $paths RETURN a.path AS a, b.path AS b",</span>
+<span id="src-retrieve-ts-L162"><i>162</i>    { paths: [...noteIds.keys()] },</span>
+<span id="src-retrieve-ts-L163"><i>163</i>  );</span>
+<span id="src-retrieve-ts-L164"><i>164</i>  for (const r of links) edges.push({ source: `note:${r.get("a")}`, target: `note:${r.get("b")}`, type: "LINKS_TO" });</span>
+<span id="src-retrieve-ts-L165"><i>165</i> </span>
+<span id="src-retrieve-ts-L166"><i>166</i>  return { passages, nodes, edges };</span>
+<span id="src-retrieve-ts-L167"><i>167</i>}</span>
+<span id="src-retrieve-ts-L168"><i>168</i> </span>
+<span id="src-retrieve-ts-L169" class="hot"><i>169</i>export function buildPrompt(question: string, passages: Passage[]) {</span>
+<span id="src-retrieve-ts-L170" class="hot"><i>170</i>  const context = passages</span>
+<span id="src-retrieve-ts-L171" class="hot"><i>171</i>    .map((p, i) =&gt; {</span>
+<span id="src-retrieve-ts-L172" class="hot"><i>172</i>      const link = `[[${p.path.replace(/\.md$/, "")}${p.heading ? "#" + p.heading : ""}]]`;</span>
+<span id="src-retrieve-ts-L173" class="hot"><i>173</i>      return `--- Source ${i + 1}: ${link}${p.via.length ? ` (related via: ${p.via.join(", ")})` : ""}\n${p.text}`;</span>
+<span id="src-retrieve-ts-L174" class="hot"><i>174</i>    })</span>
+<span id="src-retrieve-ts-L175" class="hot"><i>175</i>    .join("\n\n");</span>
+<span id="src-retrieve-ts-L176" class="hot"><i>176</i>  return [</span>
+<span id="src-retrieve-ts-L177" class="hot"><i>177</i>    {</span>
+<span id="src-retrieve-ts-L178" class="hot"><i>178</i>      role: "system" as const,</span>
+<span id="src-retrieve-ts-L179" class="hot"><i>179</i>      content:</span>
+<span id="src-retrieve-ts-L180" class="hot"><i>180</i>        "You answer questions using ONLY the user's own notes below. Be concise. Cite each fact with the exact [[wikilink]] given for its source. If the notes don't contain the answer, say so plainly instead of guessing.",</span>
+<span id="src-retrieve-ts-L181" class="hot"><i>181</i>    },</span>
+<span id="src-retrieve-ts-L182" class="hot"><i>182</i>    { role: "user" as const, content: `Notes:\n${context}\n\nQuestion: ${question}` },</span>
+<span id="src-retrieve-ts-L183" class="hot"><i>183</i>  ];</span>
+<span id="src-retrieve-ts-L184" class="hot"><i>184</i>}</span></code></pre></details>
+</section>
+
+<section id="src-ingest-ts" class="card">
+  <div class="head"><span class="num">2</span><h2>src/ingest.ts</h2><span class="lines">277 lines</span></div>
+  <p class="role">Turns markdown into the graph.</p>
+  <p>Chunks notes by heading, embeds chunks, asks an LLM for concepts, and writes Note, Chunk, Concept, Tag nodes and their edges. Incremental: unchanged notes are skipped by hash.</p>
+  <div class="box focus"><h4>Focus here</h4><ul><li><a href="#src-ingest-ts-L14">L14</a> Heading-aware chunker. This is why your giant 'Knowledge of everything' file works: it splits per heading, then packs blocks up to ~1200 chars. Code fences don't count as headings.</li><li><a href="#src-ingest-ts-L77">L77</a> Promise chain serialises every graph write, so a vault edit during a full index can't interleave and corrupt state.</li><li><a href="#src-ingest-ts-L149">L149</a> Per-note pipeline: delete old chunks, upsert note, write links, embed, extract concepts, write everything.</li><li><a href="#src-ingest-ts-L177">L177</a> Single UNWIND batch creates chunks, the HAS_CHUNK edge, Concept nodes (MERGE on lowercased name) and MENTIONS edges.</li><li><a href="#src-ingest-ts-L191">L191</a> NEXT edges give reading order between chunks.</li><li><a href="#src-ingest-ts-L198">L198</a> Concepts that co-occur in a chunk get a RELATED_TO edge. No weight yet (it would double-count on re-index).</li><li><a href="#src-ingest-ts-L233">L233</a> Batches 5 chunks per LLM call, asks for strict JSON, parses defensively. A failed batch degrades to zero concepts instead of failing the index.</li></ul></div>
+  <div class="box say"><h4>Say this when explaining</h4><ul><li>The user doesn't reorganize anything. The graph is built from messy notes automatically: headings become chunks, wikilinks become LINKS_TO edges, an LLM names the concepts.</li><li>Hashing means re-indexing only touches changed notes.</li></ul></div>
+  <div class="box watch"><h4>Honest caveats</h4><ul><li>Concept extraction is one LLM call per 5 chunks. A huge file on local Ollama will be slow on first index.</li><li>RELATED_TO has no weight, which was a deliberate cut.</li><li>Link targets that aren't indexed yet are created as placeholder Note nodes without a hash; the hash lookup ignores them.</li></ul></div>
+  <details><summary>Full source</summary><pre><code><span id="src-ingest-ts-L1"><i>1</i>import { App, Notice, TFile } from "obsidian";</span>
+<span id="src-ingest-ts-L2"><i>2</i>import type { Graph } from "./neo4j";</span>
+<span id="src-ingest-ts-L3"><i>3</i>import type { Llm } from "./llm";</span>
+<span id="src-ingest-ts-L4"><i>4</i>import type { GraphRecallSettings } from "./settings";</span>
+<span id="src-ingest-ts-L5"><i>5</i> </span>
+<span id="src-ingest-ts-L6"><i>6</i>export interface RawChunk {</span>
+<span id="src-ingest-ts-L7"><i>7</i>  heading: string;</span>
+<span id="src-ingest-ts-L8"><i>8</i>  text: string;</span>
+<span id="src-ingest-ts-L9"><i>9</i>}</span>
+<span id="src-ingest-ts-L10"><i>10</i> </span>
+<span id="src-ingest-ts-L11"><i>11</i>const MAX_CHUNK = 1200;</span>
+<span id="src-ingest-ts-L12"><i>12</i> </span>
+<span id="src-ingest-ts-L13"><i>13</i>/** Splits markdown by heading, then packs paragraphs/bullets up to ~MAX_CHUNK chars. */</span>
+<span id="src-ingest-ts-L14" class="hot"><i>14</i>export function chunkMarkdown(md: string): RawChunk[] {</span>
+<span id="src-ingest-ts-L15" class="hot"><i>15</i>  const body = md.replace(/^---\n[\s\S]*?\n---\n/, "");</span>
+<span id="src-ingest-ts-L16" class="hot"><i>16</i>  const sections: { heading: string; lines: string[] }[] = [{ heading: "", lines: [] }];</span>
+<span id="src-ingest-ts-L17" class="hot"><i>17</i>  let inFence = false;</span>
+<span id="src-ingest-ts-L18" class="hot"><i>18</i>  for (const line of body.split("\n")) {</span>
+<span id="src-ingest-ts-L19" class="hot"><i>19</i>    if (line.trim().startsWith("```")) inFence = !inFence;</span>
+<span id="src-ingest-ts-L20" class="hot"><i>20</i>    const h = !inFence &amp;&amp; /^#{1,6}\s+(.*)$/.exec(line);</span>
+<span id="src-ingest-ts-L21" class="hot"><i>21</i>    if (h) sections.push({ heading: h[1].trim(), lines: [] });</span>
+<span id="src-ingest-ts-L22" class="hot"><i>22</i>    else sections[sections.length - 1].lines.push(line);</span>
+<span id="src-ingest-ts-L23" class="hot"><i>23</i>  }</span>
+<span id="src-ingest-ts-L24" class="hot"><i>24</i> </span>
+<span id="src-ingest-ts-L25" class="hot"><i>25</i>  const chunks: RawChunk[] = [];</span>
+<span id="src-ingest-ts-L26" class="hot"><i>26</i>  for (const sec of sections) {</span>
+<span id="src-ingest-ts-L27" class="hot"><i>27</i>    // blocks separated by blank lines; a long list of bullets still splits at the size limit below</span>
+<span id="src-ingest-ts-L28" class="hot"><i>28</i>    const blocks = sec.lines.join("\n").split(/\n\s*\n/).map((b) =&gt; b.trim()).filter(Boolean);</span>
+<span id="src-ingest-ts-L29" class="hot"><i>29</i>    let cur = "";</span>
+<span id="src-ingest-ts-L30" class="hot"><i>30</i>    const flush = () =&gt; {</span>
+<span id="src-ingest-ts-L31" class="hot"><i>31</i>      if (cur.trim().length &gt; 20) chunks.push({ heading: sec.heading, text: cur.trim() });</span>
+<span id="src-ingest-ts-L32" class="hot"><i>32</i>      cur = "";</span>
+<span id="src-ingest-ts-L33" class="hot"><i>33</i>    };</span>
+<span id="src-ingest-ts-L34" class="hot"><i>34</i>    for (const block of blocks) {</span>
+<span id="src-ingest-ts-L35" class="hot"><i>35</i>      for (const piece of splitLong(block)) {</span>
+<span id="src-ingest-ts-L36" class="hot"><i>36</i>        if (cur &amp;&amp; cur.length + piece.length &gt; MAX_CHUNK) flush();</span>
+<span id="src-ingest-ts-L37" class="hot"><i>37</i>        cur += (cur ? "\n\n" : "") + piece;</span>
+<span id="src-ingest-ts-L38" class="hot"><i>38</i>      }</span>
+<span id="src-ingest-ts-L39" class="hot"><i>39</i>    }</span>
+<span id="src-ingest-ts-L40" class="hot"><i>40</i>    flush();</span>
+<span id="src-ingest-ts-L41" class="hot"><i>41</i>  }</span>
+<span id="src-ingest-ts-L42" class="hot"><i>42</i>  return chunks;</span>
+<span id="src-ingest-ts-L43" class="hot"><i>43</i>}</span>
+<span id="src-ingest-ts-L44"><i>44</i> </span>
+<span id="src-ingest-ts-L45"><i>45</i>function splitLong(block: string): string[] {</span>
+<span id="src-ingest-ts-L46"><i>46</i>  if (block.length &lt;= MAX_CHUNK) return [block];</span>
+<span id="src-ingest-ts-L47"><i>47</i>  const out: string[] = [];</span>
+<span id="src-ingest-ts-L48"><i>48</i>  let cur = "";</span>
+<span id="src-ingest-ts-L49"><i>49</i>  for (const line of block.split("\n")) {</span>
+<span id="src-ingest-ts-L50"><i>50</i>    if (cur &amp;&amp; cur.length + line.length &gt; MAX_CHUNK) {</span>
+<span id="src-ingest-ts-L51"><i>51</i>      out.push(cur);</span>
+<span id="src-ingest-ts-L52"><i>52</i>      cur = "";</span>
+<span id="src-ingest-ts-L53"><i>53</i>    }</span>
+<span id="src-ingest-ts-L54"><i>54</i>    cur += (cur ? "\n" : "") + line.slice(0, MAX_CHUNK * 2);</span>
+<span id="src-ingest-ts-L55"><i>55</i>  }</span>
+<span id="src-ingest-ts-L56"><i>56</i>  if (cur) out.push(cur);</span>
+<span id="src-ingest-ts-L57"><i>57</i>  return out;</span>
+<span id="src-ingest-ts-L58"><i>58</i>}</span>
+<span id="src-ingest-ts-L59"><i>59</i> </span>
+<span id="src-ingest-ts-L60"><i>60</i>export function hashText(s: string): string {</span>
+<span id="src-ingest-ts-L61"><i>61</i>  let h = 5381;</span>
+<span id="src-ingest-ts-L62"><i>62</i>  for (let i = 0; i &lt; s.length; i++) h = ((h &lt;&lt; 5) + h + s.charCodeAt(i)) | 0;</span>
+<span id="src-ingest-ts-L63"><i>63</i>  return `${s.length}:${h}`;</span>
+<span id="src-ingest-ts-L64"><i>64</i>}</span>
+<span id="src-ingest-ts-L65"><i>65</i> </span>
+<span id="src-ingest-ts-L66"><i>66</i>export class Indexer {</span>
+<span id="src-ingest-ts-L67"><i>67</i>  private queue: Promise&lt;unknown&gt; = Promise.resolve();</span>
+<span id="src-ingest-ts-L68"><i>68</i> </span>
+<span id="src-ingest-ts-L69"><i>69</i>  constructor(</span>
+<span id="src-ingest-ts-L70"><i>70</i>    private app: App,</span>
+<span id="src-ingest-ts-L71"><i>71</i>    private graph: Graph,</span>
+<span id="src-ingest-ts-L72"><i>72</i>    private llm: Llm,</span>
+<span id="src-ingest-ts-L73"><i>73</i>    private settings: () =&gt; GraphRecallSettings,</span>
+<span id="src-ingest-ts-L74"><i>74</i>  ) {}</span>
+<span id="src-ingest-ts-L75"><i>75</i> </span>
+<span id="src-ingest-ts-L76"><i>76</i>  /** Serialises all graph writes so vault events and a full index never interleave. */</span>
+<span id="src-ingest-ts-L77" class="hot"><i>77</i>  private enqueue&lt;T&gt;(fn: () =&gt; Promise&lt;T&gt;): Promise&lt;T&gt; {</span>
+<span id="src-ingest-ts-L78" class="hot"><i>78</i>    const next = this.queue.then(fn, fn);</span>
+<span id="src-ingest-ts-L79" class="hot"><i>79</i>    this.queue = next.catch(() =&gt; undefined);</span>
+<span id="src-ingest-ts-L80" class="hot"><i>80</i>    return next;</span>
+<span id="src-ingest-ts-L81"><i>81</i>  }</span>
+<span id="src-ingest-ts-L82"><i>82</i> </span>
+<span id="src-ingest-ts-L83"><i>83</i>  private async prepareSchema(): Promise&lt;boolean&gt; {</span>
+<span id="src-ingest-ts-L84"><i>84</i>    const [probe] = await this.llm.embed(["dimension probe"]);</span>
+<span id="src-ingest-ts-L85"><i>85</i>    return this.graph.ensureSchema(this.settings().embedModel, probe.length);</span>
+<span id="src-ingest-ts-L86"><i>86</i>  }</span>
+<span id="src-ingest-ts-L87"><i>87</i> </span>
+<span id="src-ingest-ts-L88"><i>88</i>  indexVault(): Promise&lt;void&gt; {</span>
+<span id="src-ingest-ts-L89"><i>89</i>    return this.enqueue(async () =&gt; {</span>
+<span id="src-ingest-ts-L90"><i>90</i>      const notice = new Notice("Graph Recall: preparing index…", 0);</span>
+<span id="src-ingest-ts-L91"><i>91</i>      try {</span>
+<span id="src-ingest-ts-L92"><i>92</i>        const rebuilt = await this.prepareSchema();</span>
+<span id="src-ingest-ts-L93"><i>93</i>        const existing = rebuilt ? new Map&lt;string, string&gt;() : await this.graph.indexedHashes();</span>
+<span id="src-ingest-ts-L94"><i>94</i>        const files = this.app.vault.getMarkdownFiles();</span>
+<span id="src-ingest-ts-L95"><i>95</i> </span>
+<span id="src-ingest-ts-L96"><i>96</i>        const todo: TFile[] = [];</span>
+<span id="src-ingest-ts-L97"><i>97</i>        const hashes = new Map&lt;string, string&gt;();</span>
+<span id="src-ingest-ts-L98"><i>98</i>        for (const f of files) {</span>
+<span id="src-ingest-ts-L99"><i>99</i>          const hash = hashText(await this.app.vault.cachedRead(f));</span>
+<span id="src-ingest-ts-L100"><i>100</i>          hashes.set(f.path, hash);</span>
+<span id="src-ingest-ts-L101"><i>101</i>          if (existing.get(f.path) !== hash) todo.push(f);</span>
+<span id="src-ingest-ts-L102"><i>102</i>        }</span>
+<span id="src-ingest-ts-L103"><i>103</i> </span>
+<span id="src-ingest-ts-L104"><i>104</i>        // drop notes that no longer exist in the vault</span>
+<span id="src-ingest-ts-L105"><i>105</i>        const live = new Set(files.map((f) =&gt; f.path));</span>
+<span id="src-ingest-ts-L106"><i>106</i>        for (const path of existing.keys()) if (!live.has(path)) await this.deleteNoteRaw(path);</span>
+<span id="src-ingest-ts-L107"><i>107</i> </span>
+<span id="src-ingest-ts-L108"><i>108</i>        let i = 0;</span>
+<span id="src-ingest-ts-L109"><i>109</i>        for (const f of todo) {</span>
+<span id="src-ingest-ts-L110"><i>110</i>          notice.setMessage(`Graph Recall: indexing ${++i}/${todo.length}: ${f.basename}`);</span>
+<span id="src-ingest-ts-L111"><i>111</i>          await this.indexFileRaw(f);</span>
+<span id="src-ingest-ts-L112"><i>112</i>        }</span>
+<span id="src-ingest-ts-L113"><i>113</i>        await this.pruneConcepts();</span>
+<span id="src-ingest-ts-L114"><i>114</i>        notice.hide();</span>
+<span id="src-ingest-ts-L115"><i>115</i>        new Notice(</span>
+<span id="src-ingest-ts-L116"><i>116</i>          `Graph Recall: indexed ${todo.length} note(s)${rebuilt ? " (full rebuild: embedding model changed)" : ""}.`,</span>
+<span id="src-ingest-ts-L117"><i>117</i>        );</span>
+<span id="src-ingest-ts-L118"><i>118</i>      } catch (e) {</span>
+<span id="src-ingest-ts-L119"><i>119</i>        notice.hide();</span>
+<span id="src-ingest-ts-L120"><i>120</i>        new Notice(`Graph Recall: indexing failed: ${(e as Error).message}`, 10000);</span>
+<span id="src-ingest-ts-L121"><i>121</i>        throw e;</span>
+<span id="src-ingest-ts-L122"><i>122</i>      }</span>
+<span id="src-ingest-ts-L123"><i>123</i>    });</span>
+<span id="src-ingest-ts-L124"><i>124</i>  }</span>
+<span id="src-ingest-ts-L125"><i>125</i> </span>
+<span id="src-ingest-ts-L126"><i>126</i>  indexFile(file: TFile): Promise&lt;void&gt; {</span>
+<span id="src-ingest-ts-L127"><i>127</i>    return this.enqueue(async () =&gt; {</span>
+<span id="src-ingest-ts-L128"><i>128</i>      await this.prepareSchema();</span>
+<span id="src-ingest-ts-L129"><i>129</i>      await this.indexFileRaw(file);</span>
+<span id="src-ingest-ts-L130"><i>130</i>      await this.pruneConcepts();</span>
+<span id="src-ingest-ts-L131"><i>131</i>    });</span>
+<span id="src-ingest-ts-L132"><i>132</i>  }</span>
+<span id="src-ingest-ts-L133"><i>133</i> </span>
+<span id="src-ingest-ts-L134"><i>134</i>  deleteNote(path: string): Promise&lt;void&gt; {</span>
+<span id="src-ingest-ts-L135"><i>135</i>    return this.enqueue(async () =&gt; {</span>
+<span id="src-ingest-ts-L136"><i>136</i>      await this.deleteNoteRaw(path);</span>
+<span id="src-ingest-ts-L137"><i>137</i>      await this.pruneConcepts();</span>
+<span id="src-ingest-ts-L138"><i>138</i>    });</span>
+<span id="src-ingest-ts-L139"><i>139</i>  }</span>
+<span id="src-ingest-ts-L140"><i>140</i> </span>
+<span id="src-ingest-ts-L141"><i>141</i>  private async deleteNoteRaw(path: string) {</span>
+<span id="src-ingest-ts-L142"><i>142</i>    await this.graph.run("MATCH (n:Note {path: $path}) OPTIONAL MATCH (n)-[:HAS_CHUNK]-&gt;(c) DETACH DELETE c, n", { path });</span>
+<span id="src-ingest-ts-L143"><i>143</i>  }</span>
+<span id="src-ingest-ts-L144"><i>144</i> </span>
+<span id="src-ingest-ts-L145"><i>145</i>  private async pruneConcepts() {</span>
+<span id="src-ingest-ts-L146"><i>146</i>    await this.graph.run("MATCH (k:Concept) WHERE NOT (k)&lt;-[:MENTIONS]-() DETACH DELETE k");</span>
+<span id="src-ingest-ts-L147"><i>147</i>  }</span>
+<span id="src-ingest-ts-L148"><i>148</i> </span>
+<span id="src-ingest-ts-L149" class="hot"><i>149</i>  private async indexFileRaw(file: TFile) {</span>
+<span id="src-ingest-ts-L150" class="hot"><i>150</i>    const content = await this.app.vault.cachedRead(file);</span>
+<span id="src-ingest-ts-L151" class="hot"><i>151</i>    const chunks = chunkMarkdown(content);</span>
+<span id="src-ingest-ts-L152" class="hot"><i>152</i>    const path = file.path;</span>
+<span id="src-ingest-ts-L153" class="hot"><i>153</i> </span>
+<span id="src-ingest-ts-L154" class="hot"><i>154</i>    await this.graph.run("MATCH (n:Note {path: $path})-[:HAS_CHUNK]-&gt;(c) DETACH DELETE c", { path });</span>
+<span id="src-ingest-ts-L155"><i>155</i>    await this.graph.run(</span>
+<span id="src-ingest-ts-L156"><i>156</i>      "MERGE (n:Note {path: $path}) SET n.title = $title, n.mtime = $mtime, n.hash = $hash",</span>
+<span id="src-ingest-ts-L157"><i>157</i>      { path, title: file.basename, mtime: file.stat.mtime, hash: hashText(content) },</span>
+<span id="src-ingest-ts-L158"><i>158</i>    );</span>
+<span id="src-ingest-ts-L159"><i>159</i>    await this.writeLinks(file);</span>
+<span id="src-ingest-ts-L160"><i>160</i> </span>
+<span id="src-ingest-ts-L161"><i>161</i>    if (chunks.length === 0) return;</span>
+<span id="src-ingest-ts-L162"><i>162</i> </span>
+<span id="src-ingest-ts-L163"><i>163</i>    const embeddings = await this.llm.embed(chunks.map((c) =&gt; (c.heading ? `${c.heading}\n${c.text}` : c.text)));</span>
+<span id="src-ingest-ts-L164"><i>164</i>    const concepts = await this.extractConcepts(chunks);</span>
+<span id="src-ingest-ts-L165"><i>165</i>    const rows = chunks.map((c, order) =&gt; ({</span>
+<span id="src-ingest-ts-L166"><i>166</i>      id: `${path}#${order}`,</span>
+<span id="src-ingest-ts-L167"><i>167</i>      text: c.text,</span>
+<span id="src-ingest-ts-L168"><i>168</i>      heading: c.heading,</span>
+<span id="src-ingest-ts-L169"><i>169</i>      order,</span>
+<span id="src-ingest-ts-L170"><i>170</i>      embedding: embeddings[order],</span>
+<span id="src-ingest-ts-L171"><i>171</i>      concepts: concepts[order],</span>
+<span id="src-ingest-ts-L172"><i>172</i>    }));</span>
+<span id="src-ingest-ts-L173"><i>173</i> </span>
+<span id="src-ingest-ts-L174"><i>174</i>    await this.graph.run(</span>
+<span id="src-ingest-ts-L175"><i>175</i>      `MATCH (n:Note {path: $path})</span>
+<span id="src-ingest-ts-L176"><i>176</i>       UNWIND $rows AS row</span>
+<span id="src-ingest-ts-L177" class="hot"><i>177</i>       CREATE (c:Chunk {id: row.id, text: row.text, heading: row.heading, order: row.order, embedding: row.embedding})</span>
+<span id="src-ingest-ts-L178" class="hot"><i>178</i>       CREATE (n)-[:HAS_CHUNK]-&gt;(c)</span>
+<span id="src-ingest-ts-L179" class="hot"><i>179</i>       WITH c, row</span>
+<span id="src-ingest-ts-L180" class="hot"><i>180</i>       UNWIND row.concepts AS name</span>
+<span id="src-ingest-ts-L181" class="hot"><i>181</i>       MERGE (k:Concept {nameLower: toLower(name)}) ON CREATE SET k.name = name</span>
+<span id="src-ingest-ts-L182" class="hot"><i>182</i>       MERGE (c)-[:MENTIONS]-&gt;(k)`,</span>
+<span id="src-ingest-ts-L183" class="hot"><i>183</i>      { path, rows },</span>
+<span id="src-ingest-ts-L184" class="hot"><i>184</i>    );</span>
+<span id="src-ingest-ts-L185"><i>185</i>    await this.graph.run(</span>
+<span id="src-ingest-ts-L186"><i>186</i>      `MATCH (:Note {path: $path})-[:HAS_CHUNK]-&gt;(c:Chunk)</span>
+<span id="src-ingest-ts-L187"><i>187</i>       WITH c ORDER BY c.order</span>
+<span id="src-ingest-ts-L188"><i>188</i>       WITH collect(c) AS cs</span>
+<span id="src-ingest-ts-L189"><i>189</i>       UNWIND range(0, size(cs) - 2) AS i</span>
+<span id="src-ingest-ts-L190"><i>190</i>       WITH cs[i] AS a, cs[i + 1] AS b</span>
+<span id="src-ingest-ts-L191" class="hot"><i>191</i>       MERGE (a)-[:NEXT]-&gt;(b)`,</span>
+<span id="src-ingest-ts-L192"><i>192</i>      { path },</span>
+<span id="src-ingest-ts-L193"><i>193</i>    );</span>
+<span id="src-ingest-ts-L194"><i>194</i>    await this.graph.run(</span>
+<span id="src-ingest-ts-L195"><i>195</i>      `MATCH (:Note {path: $path})-[:HAS_CHUNK]-&gt;(c:Chunk)-[:MENTIONS]-&gt;(a:Concept)</span>
+<span id="src-ingest-ts-L196"><i>196</i>       MATCH (c)-[:MENTIONS]-&gt;(b:Concept)</span>
+<span id="src-ingest-ts-L197"><i>197</i>       WHERE elementId(a) &lt; elementId(b)</span>
+<span id="src-ingest-ts-L198" class="hot"><i>198</i>       MERGE (a)-[:RELATED_TO]-(b)`,</span>
+<span id="src-ingest-ts-L199"><i>199</i>      { path },</span>
+<span id="src-ingest-ts-L200"><i>200</i>    );</span>
+<span id="src-ingest-ts-L201"><i>201</i>  }</span>
+<span id="src-ingest-ts-L202"><i>202</i> </span>
+<span id="src-ingest-ts-L203"><i>203</i>  private async writeLinks(file: TFile) {</span>
+<span id="src-ingest-ts-L204"><i>204</i>    const cache = this.app.metadataCache;</span>
+<span id="src-ingest-ts-L205"><i>205</i>    const resolved = Object.keys(cache.resolvedLinks[file.path] ?? {}).filter((p) =&gt; p.endsWith(".md"));</span>
+<span id="src-ingest-ts-L206"><i>206</i>    await this.graph.run("MATCH (:Note {path: $path})-[r:LINKS_TO]-&gt;() DELETE r", { path: file.path });</span>
+<span id="src-ingest-ts-L207"><i>207</i>    if (resolved.length) {</span>
+<span id="src-ingest-ts-L208"><i>208</i>      await this.graph.run(</span>
+<span id="src-ingest-ts-L209"><i>209</i>        `MATCH (n:Note {path: $path})</span>
+<span id="src-ingest-ts-L210"><i>210</i>         UNWIND $targets AS t</span>
+<span id="src-ingest-ts-L211"><i>211</i>         MERGE (m:Note {path: t.path}) ON CREATE SET m.title = t.title</span>
+<span id="src-ingest-ts-L212"><i>212</i>         MERGE (n)-[:LINKS_TO]-&gt;(m)`,</span>
+<span id="src-ingest-ts-L213"><i>213</i>        {</span>
+<span id="src-ingest-ts-L214"><i>214</i>          path: file.path,</span>
+<span id="src-ingest-ts-L215"><i>215</i>          targets: resolved.map((p) =&gt; ({ path: p, title: p.split("/").pop()!.replace(/\.md$/, "") })),</span>
+<span id="src-ingest-ts-L216"><i>216</i>        },</span>
+<span id="src-ingest-ts-L217"><i>217</i>      );</span>
+<span id="src-ingest-ts-L218"><i>218</i>    }</span>
+<span id="src-ingest-ts-L219"><i>219</i>    const tags = (cache.getFileCache(file)?.tags ?? []).map((t) =&gt; t.tag.replace(/^#/, ""));</span>
+<span id="src-ingest-ts-L220"><i>220</i>    await this.graph.run("MATCH (:Note {path: $path})-[r:TAGGED]-&gt;() DELETE r", { path: file.path });</span>
+<span id="src-ingest-ts-L221"><i>221</i>    if (tags.length) {</span>
+<span id="src-ingest-ts-L222"><i>222</i>      await this.graph.run(</span>
+<span id="src-ingest-ts-L223"><i>223</i>        `MATCH (n:Note {path: $path})</span>
+<span id="src-ingest-ts-L224"><i>224</i>         UNWIND $tags AS tag</span>
+<span id="src-ingest-ts-L225"><i>225</i>         MERGE (t:Tag {name: tag})</span>
+<span id="src-ingest-ts-L226"><i>226</i>         MERGE (n)-[:TAGGED]-&gt;(t)`,</span>
+<span id="src-ingest-ts-L227"><i>227</i>        { path: file.path, tags: [...new Set(tags)] },</span>
+<span id="src-ingest-ts-L228"><i>228</i>      );</span>
+<span id="src-ingest-ts-L229"><i>229</i>    }</span>
+<span id="src-ingest-ts-L230"><i>230</i>  }</span>
+<span id="src-ingest-ts-L231"><i>231</i> </span>
+<span id="src-ingest-ts-L232"><i>232</i>  /** Asks the LLM for key concepts per chunk, in small batches. Failures degrade to no concepts. */</span>
+<span id="src-ingest-ts-L233" class="hot"><i>233</i>  private async extractConcepts(chunks: RawChunk[]): Promise&lt;string[][]&gt; {</span>
+<span id="src-ingest-ts-L234" class="hot"><i>234</i>    const out: string[][] = chunks.map(() =&gt; []);</span>
+<span id="src-ingest-ts-L235" class="hot"><i>235</i>    const BATCH = 5;</span>
+<span id="src-ingest-ts-L236" class="hot"><i>236</i>    for (let i = 0; i &lt; chunks.length; i += BATCH) {</span>
+<span id="src-ingest-ts-L237" class="hot"><i>237</i>      const batch = chunks.slice(i, i + BATCH);</span>
+<span id="src-ingest-ts-L238" class="hot"><i>238</i>      const prompt = batch.map((c, j) =&gt; `[${j}] ${c.text.slice(0, 700)}`).join("\n\n");</span>
+<span id="src-ingest-ts-L239" class="hot"><i>239</i>      try {</span>
+<span id="src-ingest-ts-L240" class="hot"><i>240</i>        const reply = await this.llm.chat(</span>
+<span id="src-ingest-ts-L241" class="hot"><i>241</i>          [</span>
+<span id="src-ingest-ts-L242" class="hot"><i>242</i>            {</span>
+<span id="src-ingest-ts-L243" class="hot"><i>243</i>              role: "system",</span>
+<span id="src-ingest-ts-L244" class="hot"><i>244</i>              content:</span>
+<span id="src-ingest-ts-L245" class="hot"><i>245</i>                'Extract the key concepts from each numbered note excerpt. Reply ONLY with JSON: {"concepts": [[...], [...]]}, one array per excerpt, in order, each with 2-6 short lowercase noun phrases (1-3 words).',</span>
+<span id="src-ingest-ts-L246" class="hot"><i>246</i>            },</span>
+<span id="src-ingest-ts-L247" class="hot"><i>247</i>            { role: "user", content: prompt },</span>
+<span id="src-ingest-ts-L248" class="hot"><i>248</i>          ],</span>
+<span id="src-ingest-ts-L249" class="hot"><i>249</i>          { json: true },</span>
+<span id="src-ingest-ts-L250" class="hot"><i>250</i>        );</span>
+<span id="src-ingest-ts-L251" class="hot"><i>251</i>        const parsed = parseConcepts(reply);</span>
+<span id="src-ingest-ts-L252" class="hot"><i>252</i>        batch.forEach((_, j) =&gt; {</span>
+<span id="src-ingest-ts-L253" class="hot"><i>253</i>          out[i + j] = (parsed[j] ?? []).slice(0, 8);</span>
+<span id="src-ingest-ts-L254" class="hot"><i>254</i>        });</span>
+<span id="src-ingest-ts-L255" class="hot"><i>255</i>      } catch (e) {</span>
+<span id="src-ingest-ts-L256" class="hot"><i>256</i>        console.warn("Graph Recall: concept extraction failed for a batch", e);</span>
+<span id="src-ingest-ts-L257" class="hot"><i>257</i>      }</span>
+<span id="src-ingest-ts-L258" class="hot"><i>258</i>    }</span>
+<span id="src-ingest-ts-L259" class="hot"><i>259</i>    return out;</span>
+<span id="src-ingest-ts-L260" class="hot"><i>260</i>  }</span>
+<span id="src-ingest-ts-L261"><i>261</i>}</span>
+<span id="src-ingest-ts-L262"><i>262</i> </span>
+<span id="src-ingest-ts-L263"><i>263</i>function parseConcepts(reply: string): string[][] {</span>
+<span id="src-ingest-ts-L264"><i>264</i>  const match = /\{[\s\S]*\}/.exec(reply);</span>
+<span id="src-ingest-ts-L265"><i>265</i>  if (!match) return [];</span>
+<span id="src-ingest-ts-L266"><i>266</i>  try {</span>
+<span id="src-ingest-ts-L267"><i>267</i>    const arr = JSON.parse(match[0]).concepts;</span>
+<span id="src-ingest-ts-L268"><i>268</i>    if (!Array.isArray(arr)) return [];</span>
+<span id="src-ingest-ts-L269"><i>269</i>    return arr.map((a: unknown) =&gt;</span>
+<span id="src-ingest-ts-L270"><i>270</i>      Array.isArray(a)</span>
+<span id="src-ingest-ts-L271"><i>271</i>        ? [...new Set(a.filter((x): x is string =&gt; typeof x === "string").map((x) =&gt; x.trim().toLowerCase()).filter((x) =&gt; x.length &gt; 1 &amp;&amp; x.length &lt; 60))]</span>
+<span id="src-ingest-ts-L272"><i>272</i>        : [],</span>
+<span id="src-ingest-ts-L273"><i>273</i>    );</span>
+<span id="src-ingest-ts-L274"><i>274</i>  } catch {</span>
+<span id="src-ingest-ts-L275"><i>275</i>    return [];</span>
+<span id="src-ingest-ts-L276"><i>276</i>  }</span>
+<span id="src-ingest-ts-L277"><i>277</i>}</span></code></pre></details>
+</section>
+
+<section id="src-neo4j-ts" class="card">
+  <div class="head"><span class="num">3</span><h2>src/neo4j.ts</h2><span class="lines">92 lines</span></div>
+  <p class="role">Driver wrapper and schema owner.</p>
+  <p>Opens the Bolt connection, creates constraints and indexes, and handles the embedding-model-changed case safely.</p>
+  <div class="box focus"><h4>Focus here</h4><ul><li><a href="#src-neo4j-ts-L47">L47</a> Constraints, fulltext index, vector index. Stores {embedModel, dim} in a :Meta node; if either changes, drops the vector index and wipes our data so mixed-dimension embeddings can never coexist.</li><li><a href="#src-neo4j-ts-L69">L69</a> Index options can't be parameterised in Cypher, so the dimension is validated as an integer first and then inlined.</li><li><a href="#src-neo4j-ts-L79">L79</a> Deletes only labels this plugin owns, in batches. It never touches the rest of the user's database.</li></ul></div>
+  <div class="box say"><h4>Say this when explaining</h4><ul><li>Switching Ollama to OpenAI changes the embedding dimension (768 vs 1536). The schema layer detects that and rebuilds, so the demo can't silently return garbage.</li></ul></div>
+  <div class="box watch"><h4>Honest caveats</h4><ul><li>The wipe on model change is automatic, with no confirmation dialog.</li><li>Uses elementId(), which needs Neo4j 5.</li></ul></div>
+  <details><summary>Full source</summary><pre><code><span id="src-neo4j-ts-L1"><i>1</i>import neo4j, { Driver, Record as Neo4jRecord } from "neo4j-driver";</span>
+<span id="src-neo4j-ts-L2"><i>2</i>import type { GraphRecallSettings } from "./settings";</span>
+<span id="src-neo4j-ts-L3"><i>3</i> </span>
+<span id="src-neo4j-ts-L4"><i>4</i>const OUR_LABELS = ["Note", "Chunk", "Concept", "Tag", "Meta"];</span>
+<span id="src-neo4j-ts-L5"><i>5</i> </span>
+<span id="src-neo4j-ts-L6"><i>6</i>/** Wraps the Bolt driver and owns the schema. */</span>
+<span id="src-neo4j-ts-L7"><i>7</i>export class Graph {</span>
+<span id="src-neo4j-ts-L8"><i>8</i>  private driver: Driver | null = null;</span>
+<span id="src-neo4j-ts-L9"><i>9</i>  private key = "";</span>
+<span id="src-neo4j-ts-L10"><i>10</i> </span>
+<span id="src-neo4j-ts-L11"><i>11</i>  constructor(private s: () =&gt; GraphRecallSettings) {}</span>
+<span id="src-neo4j-ts-L12"><i>12</i> </span>
+<span id="src-neo4j-ts-L13"><i>13</i>  private getDriver(): Driver {</span>
+<span id="src-neo4j-ts-L14"><i>14</i>    const { neo4jUri, neo4jUser, neo4jPassword } = this.s();</span>
+<span id="src-neo4j-ts-L15"><i>15</i>    const key = `${neo4jUri}|${neo4jUser}|${neo4jPassword}`;</span>
+<span id="src-neo4j-ts-L16"><i>16</i>    if (!this.driver || key !== this.key) {</span>
+<span id="src-neo4j-ts-L17"><i>17</i>      void this.driver?.close();</span>
+<span id="src-neo4j-ts-L18"><i>18</i>      this.driver = neo4j.driver(neo4jUri, neo4j.auth.basic(neo4jUser, neo4jPassword));</span>
+<span id="src-neo4j-ts-L19"><i>19</i>      this.key = key;</span>
+<span id="src-neo4j-ts-L20"><i>20</i>    }</span>
+<span id="src-neo4j-ts-L21"><i>21</i>    return this.driver;</span>
+<span id="src-neo4j-ts-L22"><i>22</i>  }</span>
+<span id="src-neo4j-ts-L23"><i>23</i> </span>
+<span id="src-neo4j-ts-L24"><i>24</i>  async verify(): Promise&lt;void&gt; {</span>
+<span id="src-neo4j-ts-L25"><i>25</i>    await this.getDriver().verifyConnectivity();</span>
+<span id="src-neo4j-ts-L26"><i>26</i>  }</span>
+<span id="src-neo4j-ts-L27"><i>27</i> </span>
+<span id="src-neo4j-ts-L28"><i>28</i>  async run(cypher: string, params: Record&lt;string, unknown&gt; = {}): Promise&lt;Neo4jRecord[]&gt; {</span>
+<span id="src-neo4j-ts-L29"><i>29</i>    const database = this.s().neo4jDatabase || undefined;</span>
+<span id="src-neo4j-ts-L30"><i>30</i>    const session = this.getDriver().session({ database });</span>
+<span id="src-neo4j-ts-L31"><i>31</i>    try {</span>
+<span id="src-neo4j-ts-L32"><i>32</i>      return (await session.run(cypher, params)).records;</span>
+<span id="src-neo4j-ts-L33"><i>33</i>    } finally {</span>
+<span id="src-neo4j-ts-L34"><i>34</i>      await session.close();</span>
+<span id="src-neo4j-ts-L35"><i>35</i>    }</span>
+<span id="src-neo4j-ts-L36"><i>36</i>  }</span>
+<span id="src-neo4j-ts-L37"><i>37</i> </span>
+<span id="src-neo4j-ts-L38"><i>38</i>  async close(): Promise&lt;void&gt; {</span>
+<span id="src-neo4j-ts-L39"><i>39</i>    await this.driver?.close();</span>
+<span id="src-neo4j-ts-L40"><i>40</i>    this.driver = null;</span>
+<span id="src-neo4j-ts-L41"><i>41</i>  }</span>
+<span id="src-neo4j-ts-L42"><i>42</i> </span>
+<span id="src-neo4j-ts-L43"><i>43</i>  /**</span>
+<span id="src-neo4j-ts-L44"><i>44</i>   * Creates constraints and indexes. Returns true if the embedding model/dimension</span>
+<span id="src-neo4j-ts-L45"><i>45</i>   * changed since the last index, in which case our data was wiped and a full re-index is needed.</span>
+<span id="src-neo4j-ts-L46"><i>46</i>   */</span>
+<span id="src-neo4j-ts-L47" class="hot"><i>47</i>  async ensureSchema(embedModel: string, dim: number): Promise&lt;boolean&gt; {</span>
+<span id="src-neo4j-ts-L48" class="hot"><i>48</i>    if (!Number.isInteger(dim) || dim &lt; 1) throw new Error(`Bad embedding dimension: ${dim}`);</span>
+<span id="src-neo4j-ts-L49" class="hot"><i>49</i> </span>
+<span id="src-neo4j-ts-L50" class="hot"><i>50</i>    await this.run("CREATE CONSTRAINT note_path IF NOT EXISTS FOR (n:Note) REQUIRE n.path IS UNIQUE");</span>
+<span id="src-neo4j-ts-L51" class="hot"><i>51</i>    await this.run("CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:Chunk) REQUIRE c.id IS UNIQUE");</span>
+<span id="src-neo4j-ts-L52" class="hot"><i>52</i>    await this.run("CREATE CONSTRAINT concept_name IF NOT EXISTS FOR (k:Concept) REQUIRE k.nameLower IS UNIQUE");</span>
+<span id="src-neo4j-ts-L53" class="hot"><i>53</i>    await this.run("CREATE CONSTRAINT tag_name IF NOT EXISTS FOR (t:Tag) REQUIRE t.name IS UNIQUE");</span>
+<span id="src-neo4j-ts-L54" class="hot"><i>54</i>    await this.run("CREATE FULLTEXT INDEX chunk_text IF NOT EXISTS FOR (c:Chunk) ON EACH [c.text]");</span>
+<span id="src-neo4j-ts-L55" class="hot"><i>55</i> </span>
+<span id="src-neo4j-ts-L56" class="hot"><i>56</i>    const meta = await this.run("MATCH (m:Meta {id: 'index'}) RETURN m.embedModel AS model, m.dim AS dim");</span>
+<span id="src-neo4j-ts-L57" class="hot"><i>57</i>    const prevModel = meta[0]?.get("model");</span>
+<span id="src-neo4j-ts-L58" class="hot"><i>58</i>    const prevDim = meta[0]?.get("dim");</span>
+<span id="src-neo4j-ts-L59" class="hot"><i>59</i>    const changed = meta.length &gt; 0 &amp;&amp; (prevModel !== embedModel || Number(prevDim) !== dim);</span>
+<span id="src-neo4j-ts-L60" class="hot"><i>60</i> </span>
+<span id="src-neo4j-ts-L61" class="hot"><i>61</i>    if (changed) {</span>
+<span id="src-neo4j-ts-L62" class="hot"><i>62</i>      await this.run("DROP INDEX chunk_embedding IF EXISTS");</span>
+<span id="src-neo4j-ts-L63" class="hot"><i>63</i>      await this.wipe();</span>
+<span id="src-neo4j-ts-L64" class="hot"><i>64</i>    }</span>
+<span id="src-neo4j-ts-L65" class="hot"><i>65</i> </span>
+<span id="src-neo4j-ts-L66" class="hot"><i>66</i>    // dim is validated as an integer above; index options cannot be parameterised</span>
+<span id="src-neo4j-ts-L67" class="hot"><i>67</i>    await this.run(</span>
+<span id="src-neo4j-ts-L68" class="hot"><i>68</i>      `CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS FOR (c:Chunk) ON (c.embedding)</span>
+<span id="src-neo4j-ts-L69" class="hot"><i>69</i>       OPTIONS {indexConfig: {\`vector.dimensions\`: ${dim}, \`vector.similarity_function\`: 'cosine'}}`,</span>
+<span id="src-neo4j-ts-L70" class="hot"><i>70</i>    );</span>
+<span id="src-neo4j-ts-L71" class="hot"><i>71</i>    await this.run("MERGE (m:Meta {id: 'index'}) SET m.embedModel = $embedModel, m.dim = $dim", {</span>
+<span id="src-neo4j-ts-L72" class="hot"><i>72</i>      embedModel,</span>
+<span id="src-neo4j-ts-L73" class="hot"><i>73</i>      dim: neo4j.int(dim),</span>
+<span id="src-neo4j-ts-L74" class="hot"><i>74</i>    });</span>
+<span id="src-neo4j-ts-L75" class="hot"><i>75</i>    return changed;</span>
+<span id="src-neo4j-ts-L76" class="hot"><i>76</i>  }</span>
+<span id="src-neo4j-ts-L77" class="hot"><i>77</i> </span>
+<span id="src-neo4j-ts-L78" class="hot"><i>78</i>  /** Deletes only the nodes this plugin created, never the rest of the user's database. */</span>
+<span id="src-neo4j-ts-L79" class="hot"><i>79</i>  async wipe(): Promise&lt;void&gt; {</span>
+<span id="src-neo4j-ts-L80" class="hot"><i>80</i>    for (const label of OUR_LABELS.filter((l) =&gt; l !== "Meta")) {</span>
+<span id="src-neo4j-ts-L81" class="hot"><i>81</i>      for (;;) {</span>
+<span id="src-neo4j-ts-L82" class="hot"><i>82</i>        const r = await this.run(`MATCH (n:${label}) WITH n LIMIT 5000 DETACH DELETE n RETURN count(*) AS c`);</span>
+<span id="src-neo4j-ts-L83" class="hot"><i>83</i>        if (Number(r[0].get("c")) === 0) break;</span>
+<span id="src-neo4j-ts-L84" class="hot"><i>84</i>      }</span>
+<span id="src-neo4j-ts-L85" class="hot"><i>85</i>    }</span>
+<span id="src-neo4j-ts-L86" class="hot"><i>86</i>  }</span>
+<span id="src-neo4j-ts-L87"><i>87</i> </span>
+<span id="src-neo4j-ts-L88"><i>88</i>  async indexedHashes(): Promise&lt;Map&lt;string, string&gt;&gt; {</span>
+<span id="src-neo4j-ts-L89"><i>89</i>    const rows = await this.run("MATCH (n:Note) WHERE n.hash IS NOT NULL RETURN n.path AS path, n.hash AS hash");</span>
+<span id="src-neo4j-ts-L90"><i>90</i>    return new Map(rows.map((r) =&gt; [r.get("path") as string, r.get("hash") as string]));</span>
+<span id="src-neo4j-ts-L91"><i>91</i>  }</span>
+<span id="src-neo4j-ts-L92"><i>92</i>}</span></code></pre></details>
+</section>
+
+<section id="src-chatView-ts" class="card">
+  <div class="head"><span class="num">4</span><h2>src/chatView.ts</h2><span class="lines">153 lines</span></div>
+  <p class="role">The UI and end-to-end flow.</p>
+  <p>Chat pane: retrieve, stream the answer, render markdown with clickable citations, then draw the subgraph.</p>
+  <div class="box focus"><h4>Focus here</h4><ul><li><a href="#src-chatView-ts-L86">L86</a> The whole request lifecycle in one function: retrieve, stream tokens, render markdown, make citation links open the note, build the graph panel.</li><li><a href="#src-chatView-ts-L120">L120</a> Final answer is rendered as real Obsidian markdown so [[links]] are native links.</li><li><a href="#src-chatView-ts-L66">L66</a> Voice: first click records, second click stops, transcribes, and appends to the input.</li></ul></div>
+  <div class="box say"><h4>Say this when explaining</h4><ul><li>Click any node in the graph and the note opens at that heading. The answer, the evidence and the source are all one click apart.</li></ul></div>
+  <div class="box watch"><h4>Honest caveats</h4><ul><li>Mic button only exists if an STT URL is configured.</li><li>Uses innerHTML for a static legend string only; no user content goes through it.</li></ul></div>
+  <details><summary>Full source</summary><pre><code><span id="src-chatView-ts-L1"><i>1</i>import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf } from "obsidian";</span>
+<span id="src-chatView-ts-L2"><i>2</i>import type GraphRecallPlugin from "../main";</span>
+<span id="src-chatView-ts-L3"><i>3</i>import { buildPrompt, retrieve } from "./retrieve";</span>
+<span id="src-chatView-ts-L4"><i>4</i>import { GraphPanel } from "./graphView";</span>
+<span id="src-chatView-ts-L5"><i>5</i>import { Recorder } from "./voice";</span>
+<span id="src-chatView-ts-L6"><i>6</i> </span>
+<span id="src-chatView-ts-L7"><i>7</i>export const VIEW_TYPE = "graph-recall-chat";</span>
+<span id="src-chatView-ts-L8"><i>8</i> </span>
+<span id="src-chatView-ts-L9"><i>9</i>export class ChatView extends ItemView {</span>
+<span id="src-chatView-ts-L10"><i>10</i>  private log!: HTMLElement;</span>
+<span id="src-chatView-ts-L11"><i>11</i>  private input!: HTMLTextAreaElement;</span>
+<span id="src-chatView-ts-L12"><i>12</i>  private mic!: HTMLButtonElement;</span>
+<span id="src-chatView-ts-L13"><i>13</i>  private send!: HTMLButtonElement;</span>
+<span id="src-chatView-ts-L14"><i>14</i>  private recorder = new Recorder();</span>
+<span id="src-chatView-ts-L15"><i>15</i>  private panels: GraphPanel[] = [];</span>
+<span id="src-chatView-ts-L16"><i>16</i>  private busy = false;</span>
+<span id="src-chatView-ts-L17"><i>17</i> </span>
+<span id="src-chatView-ts-L18"><i>18</i>  constructor(leaf: WorkspaceLeaf, private plugin: GraphRecallPlugin) {</span>
+<span id="src-chatView-ts-L19"><i>19</i>    super(leaf);</span>
+<span id="src-chatView-ts-L20"><i>20</i>  }</span>
+<span id="src-chatView-ts-L21"><i>21</i> </span>
+<span id="src-chatView-ts-L22"><i>22</i>  getViewType() {</span>
+<span id="src-chatView-ts-L23"><i>23</i>    return VIEW_TYPE;</span>
+<span id="src-chatView-ts-L24"><i>24</i>  }</span>
+<span id="src-chatView-ts-L25"><i>25</i>  getDisplayText() {</span>
+<span id="src-chatView-ts-L26"><i>26</i>    return "Graph Recall";</span>
+<span id="src-chatView-ts-L27"><i>27</i>  }</span>
+<span id="src-chatView-ts-L28"><i>28</i>  getIcon() {</span>
+<span id="src-chatView-ts-L29"><i>29</i>    return "git-fork";</span>
+<span id="src-chatView-ts-L30"><i>30</i>  }</span>
+<span id="src-chatView-ts-L31"><i>31</i> </span>
+<span id="src-chatView-ts-L32"><i>32</i>  async onOpen() {</span>
+<span id="src-chatView-ts-L33"><i>33</i>    const root = this.contentEl;</span>
+<span id="src-chatView-ts-L34"><i>34</i>    root.empty();</span>
+<span id="src-chatView-ts-L35"><i>35</i>    root.addClass("graph-recall");</span>
+<span id="src-chatView-ts-L36"><i>36</i> </span>
+<span id="src-chatView-ts-L37"><i>37</i>    this.log = root.createDiv("gr-log");</span>
+<span id="src-chatView-ts-L38"><i>38</i>    this.log.createDiv({</span>
+<span id="src-chatView-ts-L39"><i>39</i>      cls: "gr-hint",</span>
+<span id="src-chatView-ts-L40"><i>40</i>      text: "Ask anything about your notes. Answers cite their sources, and the graph shows how they were found.",</span>
+<span id="src-chatView-ts-L41"><i>41</i>    });</span>
+<span id="src-chatView-ts-L42"><i>42</i> </span>
+<span id="src-chatView-ts-L43"><i>43</i>    const bar = root.createDiv("gr-input");</span>
+<span id="src-chatView-ts-L44"><i>44</i>    this.input = bar.createEl("textarea", { attr: { placeholder: "What did I learn about…?", rows: "2" } });</span>
+<span id="src-chatView-ts-L45"><i>45</i>    this.input.addEventListener("keydown", (e) =&gt; {</span>
+<span id="src-chatView-ts-L46"><i>46</i>      if (e.key === "Enter" &amp;&amp; !e.shiftKey) {</span>
+<span id="src-chatView-ts-L47"><i>47</i>        e.preventDefault();</span>
+<span id="src-chatView-ts-L48"><i>48</i>        void this.ask();</span>
+<span id="src-chatView-ts-L49"><i>49</i>      }</span>
+<span id="src-chatView-ts-L50"><i>50</i>    });</span>
+<span id="src-chatView-ts-L51"><i>51</i> </span>
+<span id="src-chatView-ts-L52"><i>52</i>    const buttons = bar.createDiv("gr-buttons");</span>
+<span id="src-chatView-ts-L53"><i>53</i>    if (this.plugin.llm().canTranscribe) {</span>
+<span id="src-chatView-ts-L54"><i>54</i>      this.mic = buttons.createEl("button", { text: "🎙", attr: { "aria-label": "Dictate" } });</span>
+<span id="src-chatView-ts-L55"><i>55</i>      this.mic.addEventListener("click", () =&gt; void this.toggleMic());</span>
+<span id="src-chatView-ts-L56"><i>56</i>    }</span>
+<span id="src-chatView-ts-L57"><i>57</i>    this.send = buttons.createEl("button", { text: "Ask", cls: "mod-cta" });</span>
+<span id="src-chatView-ts-L58"><i>58</i>    this.send.addEventListener("click", () =&gt; void this.ask());</span>
+<span id="src-chatView-ts-L59"><i>59</i>  }</span>
+<span id="src-chatView-ts-L60"><i>60</i> </span>
+<span id="src-chatView-ts-L61"><i>61</i>  async onClose() {</span>
+<span id="src-chatView-ts-L62"><i>62</i>    this.panels.forEach((p) =&gt; p.destroy());</span>
+<span id="src-chatView-ts-L63"><i>63</i>    this.panels = [];</span>
+<span id="src-chatView-ts-L64"><i>64</i>  }</span>
+<span id="src-chatView-ts-L65"><i>65</i> </span>
+<span id="src-chatView-ts-L66" class="hot"><i>66</i>  private async toggleMic() {</span>
+<span id="src-chatView-ts-L67" class="hot"><i>67</i>    try {</span>
+<span id="src-chatView-ts-L68" class="hot"><i>68</i>      if (!this.recorder.recording) {</span>
+<span id="src-chatView-ts-L69" class="hot"><i>69</i>        await this.recorder.start();</span>
+<span id="src-chatView-ts-L70" class="hot"><i>70</i>        this.mic.addClass("gr-recording");</span>
+<span id="src-chatView-ts-L71" class="hot"><i>71</i>        return;</span>
+<span id="src-chatView-ts-L72" class="hot"><i>72</i>      }</span>
+<span id="src-chatView-ts-L73" class="hot"><i>73</i>      this.mic.removeClass("gr-recording");</span>
+<span id="src-chatView-ts-L74" class="hot"><i>74</i>      const blob = await this.recorder.stop();</span>
+<span id="src-chatView-ts-L75" class="hot"><i>75</i>      this.mic.disabled = true;</span>
+<span id="src-chatView-ts-L76" class="hot"><i>76</i>      const text = await this.plugin.llm().transcribe(blob);</span>
+<span id="src-chatView-ts-L77" class="hot"><i>77</i>      this.input.value = (this.input.value + " " + text).trim();</span>
+<span id="src-chatView-ts-L78" class="hot"><i>78</i>      this.input.focus();</span>
+<span id="src-chatView-ts-L79" class="hot"><i>79</i>    } catch (e) {</span>
+<span id="src-chatView-ts-L80" class="hot"><i>80</i>      new Notice(`Voice input failed: ${(e as Error).message}`);</span>
+<span id="src-chatView-ts-L81" class="hot"><i>81</i>    } finally {</span>
+<span id="src-chatView-ts-L82" class="hot"><i>82</i>      this.mic.disabled = false;</span>
+<span id="src-chatView-ts-L83" class="hot"><i>83</i>    }</span>
+<span id="src-chatView-ts-L84"><i>84</i>  }</span>
+<span id="src-chatView-ts-L85"><i>85</i> </span>
+<span id="src-chatView-ts-L86" class="hot"><i>86</i>  private async ask() {</span>
+<span id="src-chatView-ts-L87" class="hot"><i>87</i>    const question = this.input.value.trim();</span>
+<span id="src-chatView-ts-L88" class="hot"><i>88</i>    if (!question || this.busy) return;</span>
+<span id="src-chatView-ts-L89" class="hot"><i>89</i>    this.busy = true;</span>
+<span id="src-chatView-ts-L90" class="hot"><i>90</i>    this.send.disabled = true;</span>
+<span id="src-chatView-ts-L91" class="hot"><i>91</i>    this.input.value = "";</span>
+<span id="src-chatView-ts-L92" class="hot"><i>92</i> </span>
+<span id="src-chatView-ts-L93" class="hot"><i>93</i>    const q = this.log.createDiv("gr-msg gr-user");</span>
+<span id="src-chatView-ts-L94" class="hot"><i>94</i>    q.setText(question);</span>
+<span id="src-chatView-ts-L95" class="hot"><i>95</i>    const a = this.log.createDiv("gr-msg gr-assistant");</span>
+<span id="src-chatView-ts-L96" class="hot"><i>96</i>    a.setText("Searching your graph…");</span>
+<span id="src-chatView-ts-L97" class="hot"><i>97</i>    this.log.scrollTop = this.log.scrollHeight;</span>
+<span id="src-chatView-ts-L98" class="hot"><i>98</i> </span>
+<span id="src-chatView-ts-L99" class="hot"><i>99</i>    try {</span>
+<span id="src-chatView-ts-L100" class="hot"><i>100</i>      const graph = this.plugin.graph();</span>
+<span id="src-chatView-ts-L101" class="hot"><i>101</i>      const llm = this.plugin.llm();</span>
+<span id="src-chatView-ts-L102" class="hot"><i>102</i>      const result = await retrieve(graph, llm, question);</span>
+<span id="src-chatView-ts-L103" class="hot"><i>103</i> </span>
+<span id="src-chatView-ts-L104" class="hot"><i>104</i>      if (result.passages.length === 0) {</span>
+<span id="src-chatView-ts-L105" class="hot"><i>105</i>        a.setText("Nothing in the index matches. Have you run “Index vault” yet?");</span>
+<span id="src-chatView-ts-L106" class="hot"><i>106</i>        return;</span>
+<span id="src-chatView-ts-L107" class="hot"><i>107</i>      }</span>
+<span id="src-chatView-ts-L108" class="hot"><i>108</i> </span>
+<span id="src-chatView-ts-L109" class="hot"><i>109</i>      a.empty();</span>
+<span id="src-chatView-ts-L110" class="hot"><i>110</i>      let answer = "";</span>
+<span id="src-chatView-ts-L111" class="hot"><i>111</i>      const body = a.createDiv("gr-answer");</span>
+<span id="src-chatView-ts-L112" class="hot"><i>112</i>      await llm.chat(buildPrompt(question, result.passages), {</span>
+<span id="src-chatView-ts-L113" class="hot"><i>113</i>        onToken: (t) =&gt; {</span>
+<span id="src-chatView-ts-L114" class="hot"><i>114</i>          answer += t;</span>
+<span id="src-chatView-ts-L115" class="hot"><i>115</i>          body.setText(answer);</span>
+<span id="src-chatView-ts-L116" class="hot"><i>116</i>          this.log.scrollTop = this.log.scrollHeight;</span>
+<span id="src-chatView-ts-L117" class="hot"><i>117</i>        },</span>
+<span id="src-chatView-ts-L118" class="hot"><i>118</i>      });</span>
+<span id="src-chatView-ts-L119" class="hot"><i>119</i>      body.empty();</span>
+<span id="src-chatView-ts-L120" class="hot"><i>120</i>      await MarkdownRenderer.render(this.app, answer, body, "", this);</span>
+<span id="src-chatView-ts-L121" class="hot"><i>121</i>      body.querySelectorAll("a.internal-link").forEach((link) =&gt;</span>
+<span id="src-chatView-ts-L122" class="hot"><i>122</i>        link.addEventListener("click", (ev) =&gt; {</span>
+<span id="src-chatView-ts-L123" class="hot"><i>123</i>          ev.preventDefault();</span>
+<span id="src-chatView-ts-L124" class="hot"><i>124</i>          void this.app.workspace.openLinkText(link.getAttribute("data-href") ?? "", "", false);</span>
+<span id="src-chatView-ts-L125" class="hot"><i>125</i>        }),</span>
+<span id="src-chatView-ts-L126" class="hot"><i>126</i>      );</span>
+<span id="src-chatView-ts-L127" class="hot"><i>127</i> </span>
+<span id="src-chatView-ts-L128" class="hot"><i>128</i>      const details = a.createEl("details", { cls: "gr-graph-wrap" });</span>
+<span id="src-chatView-ts-L129" class="hot"><i>129</i>      details.open = true;</span>
+<span id="src-chatView-ts-L130" class="hot"><i>130</i>      details.createEl("summary", {</span>
+<span id="src-chatView-ts-L131" class="hot"><i>131</i>        text: `Graph: ${result.passages.filter((p) =&gt; p.role === "seed").length} direct hits, ${result.passages.filter((p) =&gt; p.role === "expanded").length} found by traversal`,</span>
+<span id="src-chatView-ts-L132" class="hot"><i>132</i>      });</span>
+<span id="src-chatView-ts-L133" class="hot"><i>133</i>      const legend = details.createDiv("gr-legend");</span>
+<span id="src-chatView-ts-L134" class="hot"><i>134</i>      legend.innerHTML =</span>
+<span id="src-chatView-ts-L135" class="hot"><i>135</i>        '&lt;span style="color:#4c8bf5"&gt;● search hit&lt;/span&gt; &lt;span style="color:#f59e0b"&gt;● graph expansion&lt;/span&gt; &lt;span style="color:#10b981"&gt;◆ shared concept&lt;/span&gt; &lt;span style="color:#9ca3af"&gt;▬ note&lt;/span&gt;';</span>
+<span id="src-chatView-ts-L136" class="hot"><i>136</i>      const canvas = details.createDiv("gr-graph");</span>
+<span id="src-chatView-ts-L137" class="hot"><i>137</i>      const panel = new GraphPanel(canvas, (node) =&gt; {</span>
+<span id="src-chatView-ts-L138" class="hot"><i>138</i>        if (node.path) {</span>
+<span id="src-chatView-ts-L139" class="hot"><i>139</i>          const target = node.heading ? `${node.path}#${node.heading}` : node.path;</span>
+<span id="src-chatView-ts-L140" class="hot"><i>140</i>          void this.app.workspace.openLinkText(target, "", false);</span>
+<span id="src-chatView-ts-L141" class="hot"><i>141</i>        }</span>
+<span id="src-chatView-ts-L142" class="hot"><i>142</i>      });</span>
+<span id="src-chatView-ts-L143" class="hot"><i>143</i>      this.panels.push(panel);</span>
+<span id="src-chatView-ts-L144" class="hot"><i>144</i>      panel.render(result.nodes, result.edges);</span>
+<span id="src-chatView-ts-L145" class="hot"><i>145</i>    } catch (e) {</span>
+<span id="src-chatView-ts-L146" class="hot"><i>146</i>      a.setText(`Error: ${(e as Error).message}`);</span>
+<span id="src-chatView-ts-L147" class="hot"><i>147</i>    } finally {</span>
+<span id="src-chatView-ts-L148" class="hot"><i>148</i>      this.busy = false;</span>
+<span id="src-chatView-ts-L149" class="hot"><i>149</i>      this.send.disabled = false;</span>
+<span id="src-chatView-ts-L150" class="hot"><i>150</i>      this.log.scrollTop = this.log.scrollHeight;</span>
+<span id="src-chatView-ts-L151" class="hot"><i>151</i>    }</span>
+<span id="src-chatView-ts-L152" class="hot"><i>152</i>  }</span>
+<span id="src-chatView-ts-L153" class="hot"><i>153</i>}</span></code></pre></details>
+</section>
+
+<section id="src-llm-ts" class="card">
+  <div class="head"><span class="num">5</span><h2>src/llm.ts</h2><span class="lines">105 lines</span></div>
+  <p class="role">Provider-agnostic model client.</p>
+  <p>One client for any OpenAI-compatible API: embeddings, streaming chat, transcription.</p>
+  <div class="box focus"><h4>Focus here</h4><ul><li><a href="#src-llm-ts-L29">L29</a> Batches inputs 32 at a time to /embeddings.</li><li><a href="#src-llm-ts-L45">L45</a> Non-streaming returns JSON; streaming parses Server-Sent Events. response_format json_object is used for concept extraction.</li><li><a href="#src-llm-ts-L97">L97</a> Multipart upload to /audio/transcriptions.</li></ul></div>
+  <div class="box say"><h4>Say this when explaining</h4><ul><li>Ollama exposes an OpenAI-compatible API, so provider switching is only a base URL, a key and model names. No framework required.</li></ul></div>
+  <div class="box watch"><h4>Honest caveats</h4><ul><li>Uses fetch, so it relies on the provider allowing Obsidian's app:// origin (CORS). I believe Ollama's defaults allow it, but that is unverified here.</li><li>Whether local models honour response_format json_object varies; parsing is defensive.</li></ul></div>
+  <details><summary>Full source</summary><pre><code><span id="src-llm-ts-L1"><i>1</i>import type { GraphRecallSettings } from "./settings";</span>
+<span id="src-llm-ts-L2"><i>2</i> </span>
+<span id="src-llm-ts-L3"><i>3</i>export interface ChatMessage {</span>
+<span id="src-llm-ts-L4"><i>4</i>  role: "system" | "user" | "assistant";</span>
+<span id="src-llm-ts-L5"><i>5</i>  content: string;</span>
+<span id="src-llm-ts-L6"><i>6</i>}</span>
+<span id="src-llm-ts-L7"><i>7</i> </span>
+<span id="src-llm-ts-L8"><i>8</i>interface ChatOpts {</span>
+<span id="src-llm-ts-L9"><i>9</i>  json?: boolean;</span>
+<span id="src-llm-ts-L10"><i>10</i>  onToken?: (t: string) =&gt; void;</span>
+<span id="src-llm-ts-L11"><i>11</i>  signal?: AbortSignal;</span>
+<span id="src-llm-ts-L12"><i>12</i>}</span>
+<span id="src-llm-ts-L13"><i>13</i> </span>
+<span id="src-llm-ts-L14"><i>14</i>/** Thin client for any OpenAI-compatible API (Ollama exposes one at /v1). */</span>
+<span id="src-llm-ts-L15"><i>15</i>export class Llm {</span>
+<span id="src-llm-ts-L16"><i>16</i>  constructor(private s: () =&gt; GraphRecallSettings) {}</span>
+<span id="src-llm-ts-L17"><i>17</i> </span>
+<span id="src-llm-ts-L18"><i>18</i>  private headers(extra: Record&lt;string, string&gt; = {}) {</span>
+<span id="src-llm-ts-L19"><i>19</i>    const { apiKey } = this.s();</span>
+<span id="src-llm-ts-L20"><i>20</i>    return { ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}), ...extra };</span>
+<span id="src-llm-ts-L21"><i>21</i>  }</span>
+<span id="src-llm-ts-L22"><i>22</i> </span>
+<span id="src-llm-ts-L23"><i>23</i>  private async post(base: string, path: string, body: BodyInit, headers: Record&lt;string, string&gt;, signal?: AbortSignal) {</span>
+<span id="src-llm-ts-L24"><i>24</i>    const res = await fetch(`${base.replace(/\/$/, "")}${path}`, { method: "POST", body, headers, signal });</span>
+<span id="src-llm-ts-L25"><i>25</i>    if (!res.ok) throw new Error(`${path} failed (${res.status}): ${(await res.text()).slice(0, 300)}`);</span>
+<span id="src-llm-ts-L26"><i>26</i>    return res;</span>
+<span id="src-llm-ts-L27"><i>27</i>  }</span>
+<span id="src-llm-ts-L28"><i>28</i> </span>
+<span id="src-llm-ts-L29" class="hot"><i>29</i>  async embed(inputs: string[]): Promise&lt;number[][]&gt; {</span>
+<span id="src-llm-ts-L30" class="hot"><i>30</i>    const s = this.s();</span>
+<span id="src-llm-ts-L31" class="hot"><i>31</i>    const out: number[][] = [];</span>
+<span id="src-llm-ts-L32" class="hot"><i>32</i>    for (let i = 0; i &lt; inputs.length; i += 32) {</span>
+<span id="src-llm-ts-L33" class="hot"><i>33</i>      const res = await this.post(</span>
+<span id="src-llm-ts-L34" class="hot"><i>34</i>        s.baseURL,</span>
+<span id="src-llm-ts-L35" class="hot"><i>35</i>        "/embeddings",</span>
+<span id="src-llm-ts-L36" class="hot"><i>36</i>        JSON.stringify({ model: s.embedModel, input: inputs.slice(i, i + 32) }),</span>
+<span id="src-llm-ts-L37" class="hot"><i>37</i>        this.headers({ "Content-Type": "application/json" }),</span>
+<span id="src-llm-ts-L38" class="hot"><i>38</i>      );</span>
+<span id="src-llm-ts-L39" class="hot"><i>39</i>      const json = await res.json();</span>
+<span id="src-llm-ts-L40" class="hot"><i>40</i>      for (const d of json.data) out.push(d.embedding);</span>
+<span id="src-llm-ts-L41" class="hot"><i>41</i>    }</span>
+<span id="src-llm-ts-L42" class="hot"><i>42</i>    return out;</span>
+<span id="src-llm-ts-L43"><i>43</i>  }</span>
+<span id="src-llm-ts-L44"><i>44</i> </span>
+<span id="src-llm-ts-L45" class="hot"><i>45</i>  async chat(messages: ChatMessage[], opts: ChatOpts = {}): Promise&lt;string&gt; {</span>
+<span id="src-llm-ts-L46" class="hot"><i>46</i>    const s = this.s();</span>
+<span id="src-llm-ts-L47" class="hot"><i>47</i>    const stream = !!opts.onToken;</span>
+<span id="src-llm-ts-L48" class="hot"><i>48</i>    const res = await this.post(</span>
+<span id="src-llm-ts-L49" class="hot"><i>49</i>      s.baseURL,</span>
+<span id="src-llm-ts-L50" class="hot"><i>50</i>      "/chat/completions",</span>
+<span id="src-llm-ts-L51" class="hot"><i>51</i>      JSON.stringify({</span>
+<span id="src-llm-ts-L52" class="hot"><i>52</i>        model: s.chatModel,</span>
+<span id="src-llm-ts-L53" class="hot"><i>53</i>        messages,</span>
+<span id="src-llm-ts-L54" class="hot"><i>54</i>        stream,</span>
+<span id="src-llm-ts-L55" class="hot"><i>55</i>        temperature: 0.2,</span>
+<span id="src-llm-ts-L56" class="hot"><i>56</i>        ...(opts.json ? { response_format: { type: "json_object" } } : {}),</span>
+<span id="src-llm-ts-L57" class="hot"><i>57</i>      }),</span>
+<span id="src-llm-ts-L58" class="hot"><i>58</i>      this.headers({ "Content-Type": "application/json" }),</span>
+<span id="src-llm-ts-L59" class="hot"><i>59</i>      opts.signal,</span>
+<span id="src-llm-ts-L60" class="hot"><i>60</i>    );</span>
+<span id="src-llm-ts-L61" class="hot"><i>61</i> </span>
+<span id="src-llm-ts-L62" class="hot"><i>62</i>    if (!stream) return (await res.json()).choices[0].message.content ?? "";</span>
+<span id="src-llm-ts-L63" class="hot"><i>63</i> </span>
+<span id="src-llm-ts-L64" class="hot"><i>64</i>    const reader = res.body!.getReader();</span>
+<span id="src-llm-ts-L65" class="hot"><i>65</i>    const decoder = new TextDecoder();</span>
+<span id="src-llm-ts-L66" class="hot"><i>66</i>    let buf = "";</span>
+<span id="src-llm-ts-L67" class="hot"><i>67</i>    let full = "";</span>
+<span id="src-llm-ts-L68" class="hot"><i>68</i>    for (;;) {</span>
+<span id="src-llm-ts-L69" class="hot"><i>69</i>      const { done, value } = await reader.read();</span>
+<span id="src-llm-ts-L70" class="hot"><i>70</i>      if (done) break;</span>
+<span id="src-llm-ts-L71" class="hot"><i>71</i>      buf += decoder.decode(value, { stream: true });</span>
+<span id="src-llm-ts-L72" class="hot"><i>72</i>      const lines = buf.split("\n");</span>
+<span id="src-llm-ts-L73" class="hot"><i>73</i>      buf = lines.pop() ?? "";</span>
+<span id="src-llm-ts-L74" class="hot"><i>74</i>      for (const line of lines) {</span>
+<span id="src-llm-ts-L75" class="hot"><i>75</i>        const l = line.trim();</span>
+<span id="src-llm-ts-L76" class="hot"><i>76</i>        if (!l.startsWith("data:")) continue;</span>
+<span id="src-llm-ts-L77" class="hot"><i>77</i>        const data = l.slice(5).trim();</span>
+<span id="src-llm-ts-L78" class="hot"><i>78</i>        if (data === "[DONE]") continue;</span>
+<span id="src-llm-ts-L79" class="hot"><i>79</i>        try {</span>
+<span id="src-llm-ts-L80" class="hot"><i>80</i>          const tok = JSON.parse(data).choices?.[0]?.delta?.content;</span>
+<span id="src-llm-ts-L81" class="hot"><i>81</i>          if (tok) {</span>
+<span id="src-llm-ts-L82" class="hot"><i>82</i>            full += tok;</span>
+<span id="src-llm-ts-L83" class="hot"><i>83</i>            opts.onToken!(tok);</span>
+<span id="src-llm-ts-L84" class="hot"><i>84</i>          }</span>
+<span id="src-llm-ts-L85" class="hot"><i>85</i>        } catch {</span>
+<span id="src-llm-ts-L86" class="hot"><i>86</i>          /* partial JSON line, ignore */</span>
+<span id="src-llm-ts-L87" class="hot"><i>87</i>        }</span>
+<span id="src-llm-ts-L88" class="hot"><i>88</i>      }</span>
+<span id="src-llm-ts-L89" class="hot"><i>89</i>    }</span>
+<span id="src-llm-ts-L90" class="hot"><i>90</i>    return full;</span>
+<span id="src-llm-ts-L91" class="hot"><i>91</i>  }</span>
+<span id="src-llm-ts-L92" class="hot"><i>92</i> </span>
+<span id="src-llm-ts-L93"><i>93</i>  get canTranscribe(): boolean {</span>
+<span id="src-llm-ts-L94"><i>94</i>    return !!this.s().sttBaseURL;</span>
+<span id="src-llm-ts-L95"><i>95</i>  }</span>
+<span id="src-llm-ts-L96"><i>96</i> </span>
+<span id="src-llm-ts-L97" class="hot"><i>97</i>  async transcribe(audio: Blob): Promise&lt;string&gt; {</span>
+<span id="src-llm-ts-L98" class="hot"><i>98</i>    const s = this.s();</span>
+<span id="src-llm-ts-L99" class="hot"><i>99</i>    const form = new FormData();</span>
+<span id="src-llm-ts-L100" class="hot"><i>100</i>    form.append("file", audio, "audio.webm");</span>
+<span id="src-llm-ts-L101" class="hot"><i>101</i>    form.append("model", s.sttModel);</span>
+<span id="src-llm-ts-L102" class="hot"><i>102</i>    const res = await this.post(s.sttBaseURL, "/audio/transcriptions", form, this.headers());</span>
+<span id="src-llm-ts-L103" class="hot"><i>103</i>    return ((await res.json()).text ?? "").trim();</span>
+<span id="src-llm-ts-L104" class="hot"><i>104</i>  }</span>
+<span id="src-llm-ts-L105"><i>105</i>}</span></code></pre></details>
+</section>
+
+<section id="src-settings-ts" class="card">
+  <div class="head"><span class="num">6</span><h2>src/settings.ts</h2><span class="lines">156 lines</span></div>
+  <p class="role">Provider presets and configuration UI.</p>
+  <p>Settings interface, Ollama/OpenAI presets, and the settings tab.</p>
+  <div class="box focus"><h4>Focus here</h4><ul><li><a href="#src-settings-ts-L26">L26</a> A provider is just a bundle of base URL, key and model names.</li><li><a href="#src-settings-ts-L74">L74</a> Selecting a provider copies the preset into settings and redraws.</li><li><a href="#src-settings-ts-L88">L88</a> Helper for text fields; hand-editing a preset field flips provider to custom.</li></ul></div>
+  <div class="box say"><h4>Say this when explaining</h4><ul><li>Local-first by default (Ollama + Docker Neo4j). One dropdown flips the same plugin to OpenAI for the live demo.</li></ul></div>
+  <div class="box watch"><h4>Honest caveats</h4><ul><li>Secrets are stored in plain text in the vault's data.json.</li><li>No confirmation before an embedding-model change triggers a rebuild.</li></ul></div>
+  <details><summary>Full source</summary><pre><code><span id="src-settings-ts-L1"><i>1</i>import { App, Notice, PluginSettingTab, Setting } from "obsidian";</span>
+<span id="src-settings-ts-L2"><i>2</i>import type GraphRecallPlugin from "../main";</span>
+<span id="src-settings-ts-L3"><i>3</i> </span>
+<span id="src-settings-ts-L4"><i>4</i>export type Provider = "ollama" | "openai" | "custom";</span>
+<span id="src-settings-ts-L5"><i>5</i> </span>
+<span id="src-settings-ts-L6"><i>6</i>export interface GraphRecallSettings {</span>
+<span id="src-settings-ts-L7"><i>7</i>  provider: Provider;</span>
+<span id="src-settings-ts-L8"><i>8</i>  baseURL: string;</span>
+<span id="src-settings-ts-L9"><i>9</i>  apiKey: string;</span>
+<span id="src-settings-ts-L10"><i>10</i>  chatModel: string;</span>
+<span id="src-settings-ts-L11"><i>11</i>  embedModel: string;</span>
+<span id="src-settings-ts-L12"><i>12</i>  sttBaseURL: string; // stt - Speech to text</span>
+<span id="src-settings-ts-L13"><i>13</i>  sttModel: string;</span>
+<span id="src-settings-ts-L14"><i>14</i>  neo4jUri: string;</span>
+<span id="src-settings-ts-L15"><i>15</i>  neo4jUser: string;</span>
+<span id="src-settings-ts-L16"><i>16</i>  neo4jPassword: string;</span>
+<span id="src-settings-ts-L17"><i>17</i>  neo4jDatabase: string;</span>
+<span id="src-settings-ts-L18"><i>18</i>  autoIndex: boolean;</span>
+<span id="src-settings-ts-L19"><i>19</i>}</span>
+<span id="src-settings-ts-L20"><i>20</i> </span>
+<span id="src-settings-ts-L21"><i>21</i>type Preset = Pick&lt;</span>
+<span id="src-settings-ts-L22"><i>22</i>  GraphRecallSettings,</span>
+<span id="src-settings-ts-L23"><i>23</i>  "baseURL" | "apiKey" | "chatModel" | "embedModel" | "sttBaseURL" | "sttModel"</span>
+<span id="src-settings-ts-L24"><i>24</i>&gt;;</span>
+<span id="src-settings-ts-L25"><i>25</i> </span>
+<span id="src-settings-ts-L26" class="hot"><i>26</i>export const PRESETS: Record&lt;Exclude&lt;Provider, "custom"&gt;, Preset&gt; = {</span>
+<span id="src-settings-ts-L27" class="hot"><i>27</i>  ollama: {</span>
+<span id="src-settings-ts-L28" class="hot"><i>28</i>    baseURL: "http://localhost:11434/v1",</span>
+<span id="src-settings-ts-L29" class="hot"><i>29</i>    apiKey: "ollama",</span>
+<span id="src-settings-ts-L30" class="hot"><i>30</i>    chatModel: "llama3.1",</span>
+<span id="src-settings-ts-L31" class="hot"><i>31</i>    embedModel: "nomic-embed-text",</span>
+<span id="src-settings-ts-L32" class="hot"><i>32</i>    // Ollama has no speech-to-text; point this at a local OpenAI-compatible Whisper server (optional)</span>
+<span id="src-settings-ts-L33" class="hot"><i>33</i>    sttBaseURL: "",</span>
+<span id="src-settings-ts-L34" class="hot"><i>34</i>    sttModel: "whisper-1",</span>
+<span id="src-settings-ts-L35" class="hot"><i>35</i>  },</span>
+<span id="src-settings-ts-L36" class="hot"><i>36</i>  openai: {</span>
+<span id="src-settings-ts-L37" class="hot"><i>37</i>    baseURL: "https://api.openai.com/v1",</span>
+<span id="src-settings-ts-L38" class="hot"><i>38</i>    apiKey: "",</span>
+<span id="src-settings-ts-L39" class="hot"><i>39</i>    chatModel: "gpt-4o-mini",</span>
+<span id="src-settings-ts-L40" class="hot"><i>40</i>    embedModel: "text-embedding-3-small",</span>
+<span id="src-settings-ts-L41" class="hot"><i>41</i>    sttBaseURL: "https://api.openai.com/v1",</span>
+<span id="src-settings-ts-L42" class="hot"><i>42</i>    sttModel: "whisper-1",</span>
+<span id="src-settings-ts-L43" class="hot"><i>43</i>  },</span>
+<span id="src-settings-ts-L44"><i>44</i>};</span>
+<span id="src-settings-ts-L45"><i>45</i> </span>
+<span id="src-settings-ts-L46"><i>46</i>export const DEFAULT_SETTINGS: GraphRecallSettings = {</span>
+<span id="src-settings-ts-L47"><i>47</i>  provider: "ollama",</span>
+<span id="src-settings-ts-L48"><i>48</i>  ...PRESETS.ollama,</span>
+<span id="src-settings-ts-L49"><i>49</i>  neo4jUri: "bolt://localhost:7687",</span>
+<span id="src-settings-ts-L50"><i>50</i>  neo4jUser: "neo4j",</span>
+<span id="src-settings-ts-L51"><i>51</i>  neo4jPassword: "graphrecall",</span>
+<span id="src-settings-ts-L52"><i>52</i>  neo4jDatabase: "",</span>
+<span id="src-settings-ts-L53"><i>53</i>  autoIndex: true,</span>
+<span id="src-settings-ts-L54"><i>54</i>};</span>
+<span id="src-settings-ts-L55"><i>55</i> </span>
+<span id="src-settings-ts-L56"><i>56</i>export class GraphRecallSettingTab extends PluginSettingTab {</span>
+<span id="src-settings-ts-L57"><i>57</i>  constructor(app: App, private plugin: GraphRecallPlugin) {</span>
+<span id="src-settings-ts-L58"><i>58</i>    super(app, plugin);</span>
+<span id="src-settings-ts-L59"><i>59</i>  }</span>
+<span id="src-settings-ts-L60"><i>60</i> </span>
+<span id="src-settings-ts-L61"><i>61</i>  display(): void {</span>
+<span id="src-settings-ts-L62"><i>62</i>    const { containerEl } = this;</span>
+<span id="src-settings-ts-L63"><i>63</i>    containerEl.empty();</span>
+<span id="src-settings-ts-L64"><i>64</i>    const s = this.plugin.settings;</span>
+<span id="src-settings-ts-L65"><i>65</i>    const save = async () =&gt; {</span>
+<span id="src-settings-ts-L66"><i>66</i>      await this.plugin.saveSettings();</span>
+<span id="src-settings-ts-L67"><i>67</i>    };</span>
+<span id="src-settings-ts-L68"><i>68</i> </span>
+<span id="src-settings-ts-L69"><i>69</i>    containerEl.createEl("h2", { text: "Model provider" });</span>
+<span id="src-settings-ts-L70"><i>70</i> </span>
+<span id="src-settings-ts-L71"><i>71</i>    new Setting(containerEl)</span>
+<span id="src-settings-ts-L72"><i>72</i>      .setName("Provider")</span>
+<span id="src-settings-ts-L73"><i>73</i>      .setDesc("Ollama for local use, OpenAI for demos. Both use the OpenAI-compatible API.")</span>
+<span id="src-settings-ts-L74" class="hot"><i>74</i>      .addDropdown((d) =&gt;</span>
+<span id="src-settings-ts-L75" class="hot"><i>75</i>        d</span>
+<span id="src-settings-ts-L76" class="hot"><i>76</i>          .addOption("ollama", "Ollama (local)")</span>
+<span id="src-settings-ts-L77" class="hot"><i>77</i>          .addOption("openai", "OpenAI")</span>
+<span id="src-settings-ts-L78" class="hot"><i>78</i>          .addOption("custom", "Custom")</span>
+<span id="src-settings-ts-L79" class="hot"><i>79</i>          .setValue(s.provider)</span>
+<span id="src-settings-ts-L80" class="hot"><i>80</i>          .onChange(async (v) =&gt; {</span>
+<span id="src-settings-ts-L81" class="hot"><i>81</i>            s.provider = v as Provider;</span>
+<span id="src-settings-ts-L82" class="hot"><i>82</i>            if (v !== "custom") Object.assign(s, PRESETS[v as Exclude&lt;Provider, "custom"&gt;]);</span>
+<span id="src-settings-ts-L83" class="hot"><i>83</i>            await save();</span>
+<span id="src-settings-ts-L84" class="hot"><i>84</i>            this.display();</span>
+<span id="src-settings-ts-L85" class="hot"><i>85</i>          }),</span>
+<span id="src-settings-ts-L86"><i>86</i>      );</span>
+<span id="src-settings-ts-L87"><i>87</i> </span>
+<span id="src-settings-ts-L88" class="hot"><i>88</i>    const text = (name: string, key: keyof GraphRecallSettings, desc = "", secret = false) =&gt;</span>
+<span id="src-settings-ts-L89" class="hot"><i>89</i>      new Setting(containerEl)</span>
+<span id="src-settings-ts-L90" class="hot"><i>90</i>        .setName(name)</span>
+<span id="src-settings-ts-L91" class="hot"><i>91</i>        .setDesc(desc)</span>
+<span id="src-settings-ts-L92" class="hot"><i>92</i>        .addText((t) =&gt; {</span>
+<span id="src-settings-ts-L93" class="hot"><i>93</i>          if (secret) t.inputEl.type = "password";</span>
+<span id="src-settings-ts-L94" class="hot"><i>94</i>          t.setValue(String(s[key] ?? "")).onChange(async (v) =&gt; {</span>
+<span id="src-settings-ts-L95" class="hot"><i>95</i>            (s[key] as string) = v.trim();</span>
+<span id="src-settings-ts-L96" class="hot"><i>96</i>            if (s.provider !== "custom" &amp;&amp; key in PRESETS.ollama) s.provider = "custom";</span>
+<span id="src-settings-ts-L97" class="hot"><i>97</i>            await save();</span>
+<span id="src-settings-ts-L98" class="hot"><i>98</i>          });</span>
+<span id="src-settings-ts-L99" class="hot"><i>99</i>        });</span>
+<span id="src-settings-ts-L100"><i>100</i> </span>
+<span id="src-settings-ts-L101"><i>101</i>    text("Base URL", "baseURL");</span>
+<span id="src-settings-ts-L102"><i>102</i>    text("API key", "apiKey", "", true);</span>
+<span id="src-settings-ts-L103"><i>103</i>    text("Chat model", "chatModel");</span>
+<span id="src-settings-ts-L104"><i>104</i>    text(</span>
+<span id="src-settings-ts-L105"><i>105</i>      "Embedding model",</span>
+<span id="src-settings-ts-L106"><i>106</i>      "embedModel",</span>
+<span id="src-settings-ts-L107"><i>107</i>      "Changing this requires a full re-index (vector dimensions differ per model).",</span>
+<span id="src-settings-ts-L108"><i>108</i>    );</span>
+<span id="src-settings-ts-L109"><i>109</i> </span>
+<span id="src-settings-ts-L110"><i>110</i>    containerEl.createEl("h2", { text: "Voice (optional)" });</span>
+<span id="src-settings-ts-L111"><i>111</i>    text(</span>
+<span id="src-settings-ts-L112"><i>112</i>      "Speech-to-text base URL",</span>
+<span id="src-settings-ts-L113"><i>113</i>      "sttBaseURL",</span>
+<span id="src-settings-ts-L114"><i>114</i>      "OpenAI-compatible /audio/transcriptions server. Leave empty to hide the mic button.",</span>
+<span id="src-settings-ts-L115"><i>115</i>    );</span>
+<span id="src-settings-ts-L116"><i>116</i>    text("Speech-to-text model", "sttModel");</span>
+<span id="src-settings-ts-L117"><i>117</i> </span>
+<span id="src-settings-ts-L118"><i>118</i>    containerEl.createEl("h2", { text: "Neo4j" });</span>
+<span id="src-settings-ts-L119"><i>119</i>    text("Bolt URI", "neo4jUri", "e.g. bolt://localhost:7687 or neo4j+s://xxxx.databases.neo4j.io");</span>
+<span id="src-settings-ts-L120"><i>120</i>    text("Username", "neo4jUser");</span>
+<span id="src-settings-ts-L121"><i>121</i>    text("Password", "neo4jPassword", "", true);</span>
+<span id="src-settings-ts-L122"><i>122</i>    text("Database", "neo4jDatabase", "Leave empty for the default database.");</span>
+<span id="src-settings-ts-L123"><i>123</i> </span>
+<span id="src-settings-ts-L124"><i>124</i>    new Setting(containerEl)</span>
+<span id="src-settings-ts-L125"><i>125</i>      .setName("Test connection")</span>
+<span id="src-settings-ts-L126"><i>126</i>      .addButton((b) =&gt;</span>
+<span id="src-settings-ts-L127"><i>127</i>        b.setButtonText("Test").onClick(async () =&gt; {</span>
+<span id="src-settings-ts-L128"><i>128</i>          try {</span>
+<span id="src-settings-ts-L129"><i>129</i>            await this.plugin.graph().verify();</span>
+<span id="src-settings-ts-L130"><i>130</i>            new Notice("Neo4j connection OK");</span>
+<span id="src-settings-ts-L131"><i>131</i>          } catch (e) {</span>
+<span id="src-settings-ts-L132"><i>132</i>            new Notice(`Neo4j connection failed: ${(e as Error).message}`);</span>
+<span id="src-settings-ts-L133"><i>133</i>          }</span>
+<span id="src-settings-ts-L134"><i>134</i>        }),</span>
+<span id="src-settings-ts-L135"><i>135</i>      );</span>
+<span id="src-settings-ts-L136"><i>136</i> </span>
+<span id="src-settings-ts-L137"><i>137</i>    containerEl.createEl("h2", { text: "Indexing" });</span>
+<span id="src-settings-ts-L138"><i>138</i>    new Setting(containerEl)</span>
+<span id="src-settings-ts-L139"><i>139</i>      .setName("Re-index changed notes automatically")</span>
+<span id="src-settings-ts-L140"><i>140</i>      .addToggle((t) =&gt;</span>
+<span id="src-settings-ts-L141"><i>141</i>        t.setValue(s.autoIndex).onChange(async (v) =&gt; {</span>
+<span id="src-settings-ts-L142"><i>142</i>          s.autoIndex = v;</span>
+<span id="src-settings-ts-L143"><i>143</i>          await save();</span>
+<span id="src-settings-ts-L144"><i>144</i>        }),</span>
+<span id="src-settings-ts-L145"><i>145</i>      );</span>
+<span id="src-settings-ts-L146"><i>146</i>    new Setting(containerEl)</span>
+<span id="src-settings-ts-L147"><i>147</i>      .setName("Index vault")</span>
+<span id="src-settings-ts-L148"><i>148</i>      .setDesc("Indexes new and changed notes. Rebuilds everything if the embedding model changed.")</span>
+<span id="src-settings-ts-L149"><i>149</i>      .addButton((b) =&gt;</span>
+<span id="src-settings-ts-L150"><i>150</i>        b</span>
+<span id="src-settings-ts-L151"><i>151</i>          .setButtonText("Index now")</span>
+<span id="src-settings-ts-L152"><i>152</i>          .setCta()</span>
+<span id="src-settings-ts-L153"><i>153</i>          .onClick(() =&gt; this.plugin.indexVault()),</span>
+<span id="src-settings-ts-L154"><i>154</i>      );</span>
+<span id="src-settings-ts-L155"><i>155</i>  }</span>
+<span id="src-settings-ts-L156"><i>156</i>}</span></code></pre></details>
+</section>
+
+<section id="main-ts" class="card">
+  <div class="head"><span class="num">7</span><h2>main.ts</h2><span class="lines">114 lines</span></div>
+  <p class="role">Plugin entry point and wiring.</p>
+  <p>Constructs Graph, Llm and Indexer, registers the view, commands and vault events.</p>
+  <div class="box focus"><h4>Focus here</h4><ul><li><a href="#main-ts-L46">L46</a> Vault events are registered only after layout is ready, so startup doesn't fire a create event for every file.</li><li><a href="#main-ts-L74">L74</a> 5-second debounce per file so typing doesn't re-embed on every keystroke.</li></ul></div>
+  
+  <div class="box watch"><h4>Honest caveats</h4><ul><li>Rename is handled as delete-then-reindex.</li></ul></div>
+  <details><summary>Full source</summary><pre><code><span id="main-ts-L1"><i>1</i>import { Notice, Plugin, TAbstractFile, TFile } from "obsidian";</span>
+<span id="main-ts-L2"><i>2</i>import { ChatView, VIEW_TYPE } from "./src/chatView";</span>
+<span id="main-ts-L3"><i>3</i>import { Indexer } from "./src/ingest";</span>
+<span id="main-ts-L4"><i>4</i>import { Llm } from "./src/llm";</span>
+<span id="main-ts-L5"><i>5</i>import { Graph } from "./src/neo4j";</span>
+<span id="main-ts-L6"><i>6</i>import { DEFAULT_SETTINGS, GraphRecallSettings, GraphRecallSettingTab } from "./src/settings";</span>
+<span id="main-ts-L7"><i>7</i> </span>
+<span id="main-ts-L8"><i>8</i>export default class GraphRecallPlugin extends Plugin {</span>
+<span id="main-ts-L9"><i>9</i>  settings!: GraphRecallSettings;</span>
+<span id="main-ts-L10"><i>10</i>  private _graph!: Graph;</span>
+<span id="main-ts-L11"><i>11</i>  private _llm!: Llm;</span>
+<span id="main-ts-L12"><i>12</i>  private indexer!: Indexer;</span>
+<span id="main-ts-L13"><i>13</i>  private timers = new Map&lt;string, number&gt;();</span>
+<span id="main-ts-L14"><i>14</i> </span>
+<span id="main-ts-L15"><i>15</i>  graph() {</span>
+<span id="main-ts-L16"><i>16</i>    return this._graph;</span>
+<span id="main-ts-L17"><i>17</i>  }</span>
+<span id="main-ts-L18"><i>18</i>  llm() {</span>
+<span id="main-ts-L19"><i>19</i>    return this._llm;</span>
+<span id="main-ts-L20"><i>20</i>  }</span>
+<span id="main-ts-L21"><i>21</i> </span>
+<span id="main-ts-L22"><i>22</i>  async onload() {</span>
+<span id="main-ts-L23"><i>23</i>    await this.loadSettings();</span>
+<span id="main-ts-L24"><i>24</i>    this._graph = new Graph(() =&gt; this.settings);</span>
+<span id="main-ts-L25"><i>25</i>    this._llm = new Llm(() =&gt; this.settings);</span>
+<span id="main-ts-L26"><i>26</i>    this.indexer = new Indexer(this.app, this._graph, this._llm, () =&gt; this.settings);</span>
+<span id="main-ts-L27"><i>27</i> </span>
+<span id="main-ts-L28"><i>28</i>    this.registerView(VIEW_TYPE, (leaf) =&gt; new ChatView(leaf, this));</span>
+<span id="main-ts-L29"><i>29</i>    this.addRibbonIcon("git-fork", "Graph Recall", () =&gt; void this.activateView());</span>
+<span id="main-ts-L30"><i>30</i>    this.addSettingTab(new GraphRecallSettingTab(this.app, this));</span>
+<span id="main-ts-L31"><i>31</i> </span>
+<span id="main-ts-L32"><i>32</i>    this.addCommand({ id: "open-chat", name: "Open chat", callback: () =&gt; void this.activateView() });</span>
+<span id="main-ts-L33"><i>33</i>    this.addCommand({ id: "index-vault", name: "Index vault", callback: () =&gt; void this.indexVault() });</span>
+<span id="main-ts-L34"><i>34</i>    this.addCommand({</span>
+<span id="main-ts-L35"><i>35</i>      id: "index-current",</span>
+<span id="main-ts-L36"><i>36</i>      name: "Re-index current note",</span>
+<span id="main-ts-L37"><i>37</i>      checkCallback: (checking) =&gt; {</span>
+<span id="main-ts-L38"><i>38</i>        const f = this.app.workspace.getActiveFile();</span>
+<span id="main-ts-L39"><i>39</i>        if (!f || f.extension !== "md") return false;</span>
+<span id="main-ts-L40"><i>40</i>        if (!checking) void this.run(() =&gt; this.indexer.indexFile(f));</span>
+<span id="main-ts-L41"><i>41</i>        return true;</span>
+<span id="main-ts-L42"><i>42</i>      },</span>
+<span id="main-ts-L43"><i>43</i>    });</span>
+<span id="main-ts-L44"><i>44</i> </span>
+<span id="main-ts-L45"><i>45</i>    // vault events only start once the layout is ready, so startup doesn't trigger a flood of "create"s</span>
+<span id="main-ts-L46" class="hot"><i>46</i>    this.app.workspace.onLayoutReady(() =&gt; {</span>
+<span id="main-ts-L47" class="hot"><i>47</i>      this.registerEvent(this.app.vault.on("modify", (f) =&gt; this.schedule(f)));</span>
+<span id="main-ts-L48" class="hot"><i>48</i>      this.registerEvent(this.app.vault.on("create", (f) =&gt; this.schedule(f)));</span>
+<span id="main-ts-L49" class="hot"><i>49</i>      this.registerEvent(</span>
+<span id="main-ts-L50" class="hot"><i>50</i>        this.app.vault.on("delete", (f) =&gt; {</span>
+<span id="main-ts-L51" class="hot"><i>51</i>          if (this.settings.autoIndex &amp;&amp; f instanceof TFile &amp;&amp; f.extension === "md") {</span>
+<span id="main-ts-L52" class="hot"><i>52</i>            void this.run(() =&gt; this.indexer.deleteNote(f.path));</span>
+<span id="main-ts-L53" class="hot"><i>53</i>          }</span>
+<span id="main-ts-L54" class="hot"><i>54</i>        }),</span>
+<span id="main-ts-L55" class="hot"><i>55</i>      );</span>
+<span id="main-ts-L56" class="hot"><i>56</i>      this.registerEvent(</span>
+<span id="main-ts-L57" class="hot"><i>57</i>        this.app.vault.on("rename", (f, oldPath) =&gt; {</span>
+<span id="main-ts-L58" class="hot"><i>58</i>          if (this.settings.autoIndex &amp;&amp; f instanceof TFile &amp;&amp; f.extension === "md") {</span>
+<span id="main-ts-L59" class="hot"><i>59</i>            void this.run(async () =&gt; {</span>
+<span id="main-ts-L60" class="hot"><i>60</i>              await this.indexer.deleteNote(oldPath);</span>
+<span id="main-ts-L61" class="hot"><i>61</i>              await this.indexer.indexFile(f);</span>
+<span id="main-ts-L62" class="hot"><i>62</i>            });</span>
+<span id="main-ts-L63" class="hot"><i>63</i>          }</span>
+<span id="main-ts-L64" class="hot"><i>64</i>        }),</span>
+<span id="main-ts-L65" class="hot"><i>65</i>      );</span>
+<span id="main-ts-L66" class="hot"><i>66</i>    });</span>
+<span id="main-ts-L67" class="hot"><i>67</i>  }</span>
+<span id="main-ts-L68"><i>68</i> </span>
+<span id="main-ts-L69"><i>69</i>  async onunload() {</span>
+<span id="main-ts-L70"><i>70</i>    this.timers.forEach((t) =&gt; window.clearTimeout(t));</span>
+<span id="main-ts-L71"><i>71</i>    await this._graph.close();</span>
+<span id="main-ts-L72"><i>72</i>  }</span>
+<span id="main-ts-L73"><i>73</i> </span>
+<span id="main-ts-L74" class="hot"><i>74</i>  private schedule(f: TAbstractFile) {</span>
+<span id="main-ts-L75" class="hot"><i>75</i>    if (!this.settings.autoIndex || !(f instanceof TFile) || f.extension !== "md") return;</span>
+<span id="main-ts-L76" class="hot"><i>76</i>    window.clearTimeout(this.timers.get(f.path));</span>
+<span id="main-ts-L77" class="hot"><i>77</i>    this.timers.set(</span>
+<span id="main-ts-L78" class="hot"><i>78</i>      f.path,</span>
+<span id="main-ts-L79" class="hot"><i>79</i>      window.setTimeout(() =&gt; {</span>
+<span id="main-ts-L80" class="hot"><i>80</i>        this.timers.delete(f.path);</span>
+<span id="main-ts-L81" class="hot"><i>81</i>        void this.run(() =&gt; this.indexer.indexFile(f));</span>
+<span id="main-ts-L82" class="hot"><i>82</i>      }, 5000),</span>
+<span id="main-ts-L83" class="hot"><i>83</i>    );</span>
+<span id="main-ts-L84" class="hot"><i>84</i>  }</span>
+<span id="main-ts-L85" class="hot"><i>85</i> </span>
+<span id="main-ts-L86"><i>86</i>  private async run(fn: () =&gt; Promise&lt;unknown&gt;) {</span>
+<span id="main-ts-L87"><i>87</i>    try {</span>
+<span id="main-ts-L88"><i>88</i>      await fn();</span>
+<span id="main-ts-L89"><i>89</i>    } catch (e) {</span>
+<span id="main-ts-L90"><i>90</i>      console.error("Graph Recall:", e);</span>
+<span id="main-ts-L91"><i>91</i>      new Notice(`Graph Recall: ${(e as Error).message}`);</span>
+<span id="main-ts-L92"><i>92</i>    }</span>
+<span id="main-ts-L93"><i>93</i>  }</span>
+<span id="main-ts-L94"><i>94</i> </span>
+<span id="main-ts-L95"><i>95</i>  indexVault() {</span>
+<span id="main-ts-L96"><i>96</i>    return this.run(() =&gt; this.indexer.indexVault());</span>
+<span id="main-ts-L97"><i>97</i>  }</span>
+<span id="main-ts-L98"><i>98</i> </span>
+<span id="main-ts-L99"><i>99</i>  async activateView() {</span>
+<span id="main-ts-L100"><i>100</i>    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];</span>
+<span id="main-ts-L101"><i>101</i>    const leaf = existing ?? this.app.workspace.getRightLeaf(false);</span>
+<span id="main-ts-L102"><i>102</i>    if (!leaf) return;</span>
+<span id="main-ts-L103"><i>103</i>    await leaf.setViewState({ type: VIEW_TYPE, active: true });</span>
+<span id="main-ts-L104"><i>104</i>    void this.app.workspace.revealLeaf(leaf);</span>
+<span id="main-ts-L105"><i>105</i>  }</span>
+<span id="main-ts-L106"><i>106</i> </span>
+<span id="main-ts-L107"><i>107</i>  async loadSettings() {</span>
+<span id="main-ts-L108"><i>108</i>    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());</span>
+<span id="main-ts-L109"><i>109</i>  }</span>
+<span id="main-ts-L110"><i>110</i> </span>
+<span id="main-ts-L111"><i>111</i>  async saveSettings() {</span>
+<span id="main-ts-L112"><i>112</i>    await this.saveData(this.settings);</span>
+<span id="main-ts-L113"><i>113</i>  }</span>
+<span id="main-ts-L114"><i>114</i>}</span></code></pre></details>
+</section>
+
+<section id="src-graphView-ts" class="card">
+  <div class="head"><span class="num">8</span><h2>src/graphView.ts</h2><span class="lines">78 lines</span></div>
+  <p class="role">Subgraph rendering (Cytoscape).</p>
+  <p>Colour and shape encode role: blue = search hit, amber = graph expansion, green diamond = shared concept, grey box = note.</p>
+  <div class="box focus"><h4>Focus here</h4><ul><li><a href="#src-graphView-ts-L4">L4</a> The visual language the demo depends on.</li></ul></div>
+  <div class="box say"><h4>Say this when explaining</h4><ul><li>The colour split is the whole argument for GraphRAG, visible in one glance.</li></ul></div>
+  <div class="box watch"><h4>Honest caveats</h4><ul><li>Layout is cose with fixed parameters; large subgraphs may look cramped.</li></ul></div>
+  <details><summary>Full source</summary><pre><code><span id="src-graphView-ts-L1"><i>1</i>import cytoscape from "cytoscape";</span>
+<span id="src-graphView-ts-L2"><i>2</i>import type { VizEdge, VizNode } from "./retrieve";</span>
+<span id="src-graphView-ts-L3"><i>3</i> </span>
+<span id="src-graphView-ts-L4" class="hot"><i>4</i>const COLORS = {</span>
+<span id="src-graphView-ts-L5" class="hot"><i>5</i>  seed: "#4c8bf5",</span>
+<span id="src-graphView-ts-L6" class="hot"><i>6</i>  expanded: "#f59e0b",</span>
+<span id="src-graphView-ts-L7" class="hot"><i>7</i>  note: "#9ca3af",</span>
+<span id="src-graphView-ts-L8" class="hot"><i>8</i>  concept: "#10b981",</span>
+<span id="src-graphView-ts-L9" class="hot"><i>9</i>};</span>
+<span id="src-graphView-ts-L10"><i>10</i> </span>
+<span id="src-graphView-ts-L11"><i>11</i>/** Renders the retrieved subgraph. Blue = vector/keyword hits, amber = pulled in by graph traversal. */</span>
+<span id="src-graphView-ts-L12"><i>12</i>export class GraphPanel {</span>
+<span id="src-graphView-ts-L13"><i>13</i>  private cy: cytoscape.Core | null = null;</span>
+<span id="src-graphView-ts-L14"><i>14</i> </span>
+<span id="src-graphView-ts-L15"><i>15</i>  constructor(</span>
+<span id="src-graphView-ts-L16"><i>16</i>    private el: HTMLElement,</span>
+<span id="src-graphView-ts-L17"><i>17</i>    private onOpen: (node: VizNode) =&gt; void,</span>
+<span id="src-graphView-ts-L18"><i>18</i>  ) {}</span>
+<span id="src-graphView-ts-L19"><i>19</i> </span>
+<span id="src-graphView-ts-L20"><i>20</i>  render(nodes: VizNode[], edges: VizEdge[]) {</span>
+<span id="src-graphView-ts-L21"><i>21</i>    this.destroy();</span>
+<span id="src-graphView-ts-L22"><i>22</i>    const ids = new Set(nodes.map((n) =&gt; n.id));</span>
+<span id="src-graphView-ts-L23"><i>23</i>    this.cy = cytoscape({</span>
+<span id="src-graphView-ts-L24"><i>24</i>      container: this.el,</span>
+<span id="src-graphView-ts-L25"><i>25</i>      elements: [</span>
+<span id="src-graphView-ts-L26"><i>26</i>        ...nodes.map((n) =&gt; ({ data: { ...n, color: colorOf(n) } })),</span>
+<span id="src-graphView-ts-L27"><i>27</i>        ...edges</span>
+<span id="src-graphView-ts-L28"><i>28</i>          .filter((e) =&gt; ids.has(e.source) &amp;&amp; ids.has(e.target))</span>
+<span id="src-graphView-ts-L29"><i>29</i>          .map((e, i) =&gt; ({ data: { id: `e${i}`, source: e.source, target: e.target, type: e.type } })),</span>
+<span id="src-graphView-ts-L30"><i>30</i>      ],</span>
+<span id="src-graphView-ts-L31"><i>31</i>      layout: { name: "cose", animate: false, nodeRepulsion: () =&gt; 9000, idealEdgeLength: () =&gt; 70 },</span>
+<span id="src-graphView-ts-L32"><i>32</i>      style: [</span>
+<span id="src-graphView-ts-L33"><i>33</i>        {</span>
+<span id="src-graphView-ts-L34"><i>34</i>          selector: "node",</span>
+<span id="src-graphView-ts-L35"><i>35</i>          style: {</span>
+<span id="src-graphView-ts-L36"><i>36</i>            "background-color": "data(color)",</span>
+<span id="src-graphView-ts-L37"><i>37</i>            label: "data(label)",</span>
+<span id="src-graphView-ts-L38"><i>38</i>            color: "#d1d5db",</span>
+<span id="src-graphView-ts-L39"><i>39</i>            "font-size": 9,</span>
+<span id="src-graphView-ts-L40"><i>40</i>            "text-valign": "bottom",</span>
+<span id="src-graphView-ts-L41"><i>41</i>            "text-margin-y": 3,</span>
+<span id="src-graphView-ts-L42"><i>42</i>            "text-wrap": "ellipsis",</span>
+<span id="src-graphView-ts-L43"><i>43</i>            "text-max-width": "90px",</span>
+<span id="src-graphView-ts-L44"><i>44</i>            width: 18,</span>
+<span id="src-graphView-ts-L45"><i>45</i>            height: 18,</span>
+<span id="src-graphView-ts-L46"><i>46</i>          },</span>
+<span id="src-graphView-ts-L47"><i>47</i>        },</span>
+<span id="src-graphView-ts-L48"><i>48</i>        { selector: 'node[kind = "note"]', style: { shape: "round-rectangle", width: 22, height: 14 } },</span>
+<span id="src-graphView-ts-L49"><i>49</i>        { selector: 'node[kind = "concept"]', style: { shape: "diamond", width: 16, height: 16 } },</span>
+<span id="src-graphView-ts-L50"><i>50</i>        {</span>
+<span id="src-graphView-ts-L51"><i>51</i>          selector: "edge",</span>
+<span id="src-graphView-ts-L52"><i>52</i>          style: {</span>
+<span id="src-graphView-ts-L53"><i>53</i>            width: 1.2,</span>
+<span id="src-graphView-ts-L54"><i>54</i>            "line-color": "#6b7280",</span>
+<span id="src-graphView-ts-L55"><i>55</i>            "curve-style": "bezier",</span>
+<span id="src-graphView-ts-L56"><i>56</i>            "target-arrow-shape": "triangle",</span>
+<span id="src-graphView-ts-L57"><i>57</i>            "target-arrow-color": "#6b7280",</span>
+<span id="src-graphView-ts-L58"><i>58</i>            "arrow-scale": 0.6,</span>
+<span id="src-graphView-ts-L59"><i>59</i>          },</span>
+<span id="src-graphView-ts-L60"><i>60</i>        },</span>
+<span id="src-graphView-ts-L61"><i>61</i>        { selector: 'edge[type = "MENTIONS"]', style: { "line-style": "dashed", "line-color": "#10b981", "target-arrow-color": "#10b981" } },</span>
+<span id="src-graphView-ts-L62"><i>62</i>        { selector: 'edge[type = "LINKS_TO"]', style: { "line-color": "#a78bfa", "target-arrow-color": "#a78bfa" } },</span>
+<span id="src-graphView-ts-L63"><i>63</i>      ],</span>
+<span id="src-graphView-ts-L64"><i>64</i>    });</span>
+<span id="src-graphView-ts-L65"><i>65</i>    this.cy.on("tap", "node", (evt) =&gt; this.onOpen(evt.target.data() as VizNode));</span>
+<span id="src-graphView-ts-L66"><i>66</i>  }</span>
+<span id="src-graphView-ts-L67"><i>67</i> </span>
+<span id="src-graphView-ts-L68"><i>68</i>  destroy() {</span>
+<span id="src-graphView-ts-L69"><i>69</i>    this.cy?.destroy();</span>
+<span id="src-graphView-ts-L70"><i>70</i>    this.cy = null;</span>
+<span id="src-graphView-ts-L71"><i>71</i>  }</span>
+<span id="src-graphView-ts-L72"><i>72</i>}</span>
+<span id="src-graphView-ts-L73"><i>73</i> </span>
+<span id="src-graphView-ts-L74"><i>74</i>function colorOf(n: VizNode): string {</span>
+<span id="src-graphView-ts-L75"><i>75</i>  if (n.kind === "note") return COLORS.note;</span>
+<span id="src-graphView-ts-L76"><i>76</i>  if (n.kind === "concept") return COLORS.concept;</span>
+<span id="src-graphView-ts-L77"><i>77</i>  return n.role === "seed" ? COLORS.seed : COLORS.expanded;</span>
+<span id="src-graphView-ts-L78"><i>78</i>}</span></code></pre></details>
+</section>
+
+<section id="src-voice-ts" class="card">
+  <div class="head"><span class="num">9</span><h2>src/voice.ts</h2><span class="lines">29 lines</span></div>
+  <p class="role">Microphone recording.</p>
+  <p>MediaRecorder wrapper that returns a Blob.</p>
+  
+  
+  <div class="box watch"><h4>Honest caveats</h4><ul><li>Electron mic permission behaviour inside Obsidian is untested.</li></ul></div>
+  <details><summary>Full source</summary><pre><code><span id="src-voice-ts-L1"><i>1</i>export class Recorder {</span>
+<span id="src-voice-ts-L2"><i>2</i>  private rec: MediaRecorder | null = null;</span>
+<span id="src-voice-ts-L3"><i>3</i>  private chunks: Blob[] = [];</span>
+<span id="src-voice-ts-L4"><i>4</i>  private stream: MediaStream | null = null;</span>
+<span id="src-voice-ts-L5"><i>5</i> </span>
+<span id="src-voice-ts-L6"><i>6</i>  get recording(): boolean {</span>
+<span id="src-voice-ts-L7"><i>7</i>    return this.rec?.state === "recording";</span>
+<span id="src-voice-ts-L8"><i>8</i>  }</span>
+<span id="src-voice-ts-L9"><i>9</i> </span>
+<span id="src-voice-ts-L10"><i>10</i>  async start(): Promise&lt;void&gt; {</span>
+<span id="src-voice-ts-L11"><i>11</i>    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });</span>
+<span id="src-voice-ts-L12"><i>12</i>    this.chunks = [];</span>
+<span id="src-voice-ts-L13"><i>13</i>    this.rec = new MediaRecorder(this.stream);</span>
+<span id="src-voice-ts-L14"><i>14</i>    this.rec.ondataavailable = (e) =&gt; e.data.size &amp;&amp; this.chunks.push(e.data);</span>
+<span id="src-voice-ts-L15"><i>15</i>    this.rec.start();</span>
+<span id="src-voice-ts-L16"><i>16</i>  }</span>
+<span id="src-voice-ts-L17"><i>17</i> </span>
+<span id="src-voice-ts-L18"><i>18</i>  stop(): Promise&lt;Blob&gt; {</span>
+<span id="src-voice-ts-L19"><i>19</i>    return new Promise((resolve, reject) =&gt; {</span>
+<span id="src-voice-ts-L20"><i>20</i>      const rec = this.rec;</span>
+<span id="src-voice-ts-L21"><i>21</i>      if (!rec) return reject(new Error("Not recording"));</span>
+<span id="src-voice-ts-L22"><i>22</i>      rec.onstop = () =&gt; {</span>
+<span id="src-voice-ts-L23"><i>23</i>        this.stream?.getTracks().forEach((t) =&gt; t.stop());</span>
+<span id="src-voice-ts-L24"><i>24</i>        resolve(new Blob(this.chunks, { type: rec.mimeType || "audio/webm" }));</span>
+<span id="src-voice-ts-L25"><i>25</i>      };</span>
+<span id="src-voice-ts-L26"><i>26</i>      rec.stop();</span>
+<span id="src-voice-ts-L27"><i>27</i>    });</span>
+<span id="src-voice-ts-L28"><i>28</i>  }</span>
+<span id="src-voice-ts-L29"><i>29</i>}</span></code></pre></details>
+</section>
+
+<section id="config" class="card"><h2>Config files</h2><details><summary>package.json</summary><pre><code>{
+  "name": "obsidian-graph-recall",
+  "version": "0.1.0",
+  "description": "GraphRAG over your Obsidian vault, powered by Neo4j",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit --skipLibCheck &amp;&amp; node esbuild.config.mjs production"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "cytoscape": "^3.30.0",
+    "neo4j-driver": "^5.27.0"
+  },
+  "devDependencies": {
+    "@types/cytoscape": "^3.21.0",
+    "@types/node": "^22.0.0",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.24.0",
+    "obsidian": "latest",
+    "typescript": "^5.6.0"
+  }
+}
+</code></pre></details>
+<details><summary>manifest.json</summary><pre><code>{
+  "id": "graph-recall",
+  "name": "Graph Recall",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Ask your vault questions. GraphRAG over your notes, powered by Neo4j, with a visual answer subgraph.",
+  "author": "Graph Recall",
+  "isDesktopOnly": true
+}
+</code></pre></details>
+<details><summary>esbuild.config.mjs</summary><pre><code>import esbuild from "esbuild";
+import process from "process";
+
+const production = process.argv[2] === "production";
+
+const ctx = await esbuild.context({
+  entryPoints: ["main.ts"],
+  bundle: true,
+  // node platform: picks neo4j-driver's Bolt-over-TCP build (not the browser websocket one)
+  platform: "node",
+  external: ["obsidian", "electron", "@codemirror/*", "@lezer/*"],
+  format: "cjs",
+  target: "es2020",
+  logLevel: "info",
+  sourcemap: production ? false : "inline",
+  minify: production,
+  treeShaking: true,
+  outfile: "main.js",
+});
+
+if (production) {
+  await ctx.rebuild();
+  process.exit(0);
+} else {
+  await ctx.watch();
+}
+</code></pre></details>
+<details><summary>docker-compose.yml</summary><pre><code>services:
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: graph-recall-neo4j
+    ports:
+      - "7474:7474" # browser
+      - "7687:7687" # bolt
+    environment:
+      NEO4J_AUTH: neo4j/graphrecall
+    volumes:
+      - neo4j-data:/data
+
+volumes:
+  neo4j-data:
+</code></pre></details>
+<details><summary>styles.css</summary><pre><code>.graph-recall { display: flex; flex-direction: column; height: 100%; padding: 8px; gap: 8px; }
+.gr-log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.gr-hint { color: var(--text-muted); font-size: var(--font-ui-small); }
+.gr-msg { padding: 8px 10px; border-radius: 8px; }
+.gr-user { background: var(--background-modifier-hover); align-self: flex-end; max-width: 90%; }
+.gr-assistant { background: var(--background-secondary); }
+.gr-graph-wrap { margin-top: 8px; }
+.gr-graph-wrap summary { cursor: pointer; color: var(--text-muted); font-size: var(--font-ui-small); }
+.gr-legend { font-size: 11px; margin: 4px 0; display: flex; gap: 10px; flex-wrap: wrap; }
+.gr-graph { height: 320px; width: 100%; background: var(--background-primary); border-radius: 6px; }
+.gr-input { display: flex; gap: 6px; align-items: flex-end; }
+.gr-input textarea { flex: 1; resize: none; }
+.gr-buttons { display: flex; flex-direction: column; gap: 4px; }
+.gr-recording { background: var(--color-red) !important; }
+</code></pre></details></section>
+</main></body></html>

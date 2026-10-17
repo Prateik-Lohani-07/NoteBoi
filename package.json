@@ -1,0 +1,23 @@
+{
+  "name": "obsidian-graph-recall",
+  "version": "0.1.0",
+  "description": "GraphRAG over your Obsidian vault, powered by Neo4j",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "cytoscape": "^3.30.0",
+    "neo4j-driver": "^5.27.0"
+  },
+  "devDependencies": {
+    "@types/cytoscape": "^3.21.0",
+    "@types/node": "^22.0.0",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.24.0",
+    "obsidian": "latest",
+    "typescript": "^5.6.0"
+  }
+}
