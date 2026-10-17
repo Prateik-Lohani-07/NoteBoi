@@ -29,7 +29,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <h1>Graph Recall: code review guide</h1>
 <p style="color:var(--mut)">Obsidian plugin: GraphRAG over your vault on Neo4j. Generated from the live source. Files are ordered by how much they matter to the demo.</p>
 
-<div class="warn"><b>Status:</b> the code type-checks and bundles, but it has <b>not been run</b> against a live Neo4j, Ollama or Obsidian yet. Treat the Cypher and the Electron behaviours as unverified until the end-to-end test.</div>
+<div class="warn"><b>Status:</b> tested against a real Neo4j 5 with a scripted harness (schema, ingest, hybrid retrieval, graph expansion, re-index, delete, embedding-model switch), with Ollama (gemma3:1b) and OpenAI (gpt-4o-mini), and manually in Obsidian. <b>Not yet tested:</b> the microphone button, Neo4j Aura, mobile (unsupported). Known weakness: graph expansion can add loosely related chunks in small vaults (no relevance cutoff yet).</div>
 
 <div class="card"><h2>How it works</h2>
 <p><b>Index time</b></p>
@@ -55,7 +55,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
   <p>Takes a question and returns (a) passages for the LLM and (b) the subgraph for the visualization. Everything Neo4j-specific that judges care about lives here.</p>
   <div class="box focus"><h4>Focus here</h4><ul><li><a href="#src-retrieve-ts-L51">L51</a> Vector search: native Neo4j vector index, top 10 chunks by cosine similarity.</li><li><a href="#src-retrieve-ts-L58">L58</a> Keyword search on the fulltext index. Catches exact terms embeddings blur (names, acronyms).</li><li><a href="#src-retrieve-ts-L64">L64</a> Reciprocal Rank Fusion merges the two rankings: score = sum of 1/(60+rank). Hybrid search without tuning weights.</li><li><a href="#src-retrieve-ts-L75">L75</a> THE GraphRAG step. From the seed chunks, walk (Chunk)-[:MENTIONS]-&gt;(Concept)&lt;-[:MENTIONS]-(Chunk) to pull in related chunks that never matched the query text. Ranked by number of shared concepts. These become the amber nodes.</li><li><a href="#src-retrieve-ts-L90">L90</a> Sequential neighbours: adds surrounding context from the same note.</li><li><a href="#src-retrieve-ts-L147">L147</a> Visualization rule: a concept node is drawn only if it links 2+ retrieved chunks. Those are exactly the connections the graph contributed, and it keeps the picture readable.</li><li><a href="#src-retrieve-ts-L169">L169</a> Grounding prompt: answer only from the notes, cite with the exact [[wikilink#heading]], say so if the answer isn't there. Each expanded passage is annotated with the concepts it was reached through.</li></ul></div>
   <div class="box say"><h4>Say this when explaining</h4><ul><li>Plain RAG stops at top-k similarity. Here the blue nodes are similarity hits and the amber nodes were found by walking the graph through shared concepts, so I can show where the graph changed the answer.</li><li>Hybrid retrieval (vector + fulltext) is fused with RRF in application code, then expanded with Cypher.</li><li>The viz isn't decoration: it's the exact subgraph the model was given.</li></ul></div>
-  <div class="box watch"><h4>Honest caveats</h4><ul><li>Concept quality depends on the LLM that extracted them. With a small local model, expansion can be noisy.</li><li>Vector index population is asynchronous in Neo4j. Right after the first index, queries can fail until the index is ONLINE.</li><li>Not yet run against a real database. The Cypher is untested.</li></ul></div>
+  <div class="box watch"><h4>Honest caveats</h4><ul><li>Concept quality depends on the LLM that extracted them. With a small local model, expansion can be noisy.</li><li>Vector index population is asynchronous in Neo4j. Right after the first index, queries can fail until the index is ONLINE.</li><li>Graph expansion has no relevance cutoff: in small vaults it can add loosely related chunks (e.g. NEXT neighbours), which makes the graph noisy.</li></ul></div>
   <details><summary>Full source</summary><pre><code><span id="src-retrieve-ts-L1"><i>1</i>import type { Graph } from "./neo4j";</span>
 <span id="src-retrieve-ts-L2"><i>2</i>import type { Llm } from "./llm";</span>
 <span id="src-retrieve-ts-L3"><i>3</i> </span>
@@ -243,12 +243,12 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 </section>
 
 <section id="src-ingest-ts" class="card">
-  <div class="head"><span class="num">2</span><h2>src/ingest.ts</h2><span class="lines">277 lines</span></div>
+  <div class="head"><span class="num">2</span><h2>src/ingest.ts</h2><span class="lines">309 lines</span></div>
   <p class="role">Turns markdown into the graph.</p>
   <p>Chunks notes by heading, embeds chunks, asks an LLM for concepts, and writes Note, Chunk, Concept, Tag nodes and their edges. Incremental: unchanged notes are skipped by hash.</p>
-  <div class="box focus"><h4>Focus here</h4><ul><li><a href="#src-ingest-ts-L14">L14</a> Heading-aware chunker. This is why your giant 'Knowledge of everything' file works: it splits per heading, then packs blocks up to ~1200 chars. Code fences don't count as headings.</li><li><a href="#src-ingest-ts-L77">L77</a> Promise chain serialises every graph write, so a vault edit during a full index can't interleave and corrupt state.</li><li><a href="#src-ingest-ts-L149">L149</a> Per-note pipeline: delete old chunks, upsert note, write links, embed, extract concepts, write everything.</li><li><a href="#src-ingest-ts-L177">L177</a> Single UNWIND batch creates chunks, the HAS_CHUNK edge, Concept nodes (MERGE on lowercased name) and MENTIONS edges.</li><li><a href="#src-ingest-ts-L191">L191</a> NEXT edges give reading order between chunks.</li><li><a href="#src-ingest-ts-L198">L198</a> Concepts that co-occur in a chunk get a RELATED_TO edge. No weight yet (it would double-count on re-index).</li><li><a href="#src-ingest-ts-L233">L233</a> Batches 5 chunks per LLM call, asks for strict JSON, parses defensively. A failed batch degrades to zero concepts instead of failing the index.</li></ul></div>
+  <div class="box focus"><h4>Focus here</h4><ul><li><a href="#src-ingest-ts-L14">L14</a> Heading-aware chunker. This is why your giant 'Knowledge of everything' file works: it splits per heading, then packs blocks up to ~1200 chars. Code fences don't count as headings.</li><li><a href="#src-ingest-ts-L77">L77</a> Promise chain serialises every graph write, so a vault edit during a full index can't interleave and corrupt state.</li><li><a href="#src-ingest-ts-L149">L149</a> Per-note pipeline: delete old chunks, upsert note, write links, embed, extract concepts, write everything.</li><li><a href="#src-ingest-ts-L183">L183</a> Single UNWIND batch creates chunks, the HAS_CHUNK edge, Concept nodes (MERGE on lowercased name) and MENTIONS edges.</li><li><a href="#src-ingest-ts-L197">L197</a> NEXT edges give reading order between chunks.</li><li><a href="#src-ingest-ts-L204">L204</a> Concepts that co-occur in a chunk get a RELATED_TO edge. No weight yet (it would double-count on re-index).</li><li><a href="#src-ingest-ts-L244">L244</a> One LLM call per chunk, 3 in flight. Small models could not keep several excerpts apart, so batching was dropped. Failures are counted, and the note's hash is only stored when none failed, so a failed note is retried on the next index.</li><li><a href="#src-ingest-ts-L287">L287</a> Tolerant parser: accepts strings or {concept|name|term} objects, because gemma3:1b ignored the requested shape. Returns null (a failure) for unusable replies, and an empty list is a valid result.</li></ul></div>
   <div class="box say"><h4>Say this when explaining</h4><ul><li>The user doesn't reorganize anything. The graph is built from messy notes automatically: headings become chunks, wikilinks become LINKS_TO edges, an LLM names the concepts.</li><li>Hashing means re-indexing only touches changed notes.</li></ul></div>
-  <div class="box watch"><h4>Honest caveats</h4><ul><li>Concept extraction is one LLM call per 5 chunks. A huge file on local Ollama will be slow on first index.</li><li>RELATED_TO has no weight, which was a deliberate cut.</li><li>Link targets that aren't indexed yet are created as placeholder Note nodes without a hash; the hash lookup ignores them.</li></ul></div>
+  <div class="box watch"><h4>Honest caveats</h4><ul><li>Concept extraction is one LLM call per chunk. A huge file on local Ollama will be slow on first index.</li><li>RELATED_TO has no weight, which was a deliberate cut.</li><li>Link targets that aren't indexed yet are created as placeholder Note nodes without a hash; the hash lookup ignores them.</li></ul></div>
   <details><summary>Full source</summary><pre><code><span id="src-ingest-ts-L1"><i>1</i>import { App, Notice, TFile } from "obsidian";</span>
 <span id="src-ingest-ts-L2"><i>2</i>import type { Graph } from "./neo4j";</span>
 <span id="src-ingest-ts-L3"><i>3</i>import type { Llm } from "./llm";</span>
@@ -322,7 +322,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-ingest-ts-L71"><i>71</i>    private graph: Graph,</span>
 <span id="src-ingest-ts-L72"><i>72</i>    private llm: Llm,</span>
 <span id="src-ingest-ts-L73"><i>73</i>    private settings: () =&gt; GraphRecallSettings,</span>
-<span id="src-ingest-ts-L74"><i>74</i>  ) {}</span>
+<span id="src-ingest-ts-L74"><i>74</i>  ) { }</span>
 <span id="src-ingest-ts-L75"><i>75</i> </span>
 <span id="src-ingest-ts-L76"><i>76</i>  /** Serialises all graph writes so vault events and a full index never interleave. */</span>
 <span id="src-ingest-ts-L77" class="hot"><i>77</i>  private enqueue&lt;T&gt;(fn: () =&gt; Promise&lt;T&gt;): Promise&lt;T&gt; {</span>
@@ -403,129 +403,161 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-ingest-ts-L152" class="hot"><i>152</i>    const path = file.path;</span>
 <span id="src-ingest-ts-L153" class="hot"><i>153</i> </span>
 <span id="src-ingest-ts-L154" class="hot"><i>154</i>    await this.graph.run("MATCH (n:Note {path: $path})-[:HAS_CHUNK]-&gt;(c) DETACH DELETE c", { path });</span>
-<span id="src-ingest-ts-L155"><i>155</i>    await this.graph.run(</span>
-<span id="src-ingest-ts-L156"><i>156</i>      "MERGE (n:Note {path: $path}) SET n.title = $title, n.mtime = $mtime, n.hash = $hash",</span>
-<span id="src-ingest-ts-L157"><i>157</i>      { path, title: file.basename, mtime: file.stat.mtime, hash: hashText(content) },</span>
-<span id="src-ingest-ts-L158"><i>158</i>    );</span>
-<span id="src-ingest-ts-L159"><i>159</i>    await this.writeLinks(file);</span>
-<span id="src-ingest-ts-L160"><i>160</i> </span>
-<span id="src-ingest-ts-L161"><i>161</i>    if (chunks.length === 0) return;</span>
-<span id="src-ingest-ts-L162"><i>162</i> </span>
-<span id="src-ingest-ts-L163"><i>163</i>    const embeddings = await this.llm.embed(chunks.map((c) =&gt; (c.heading ? `${c.heading}\n${c.text}` : c.text)));</span>
-<span id="src-ingest-ts-L164"><i>164</i>    const concepts = await this.extractConcepts(chunks);</span>
-<span id="src-ingest-ts-L165"><i>165</i>    const rows = chunks.map((c, order) =&gt; ({</span>
-<span id="src-ingest-ts-L166"><i>166</i>      id: `${path}#${order}`,</span>
-<span id="src-ingest-ts-L167"><i>167</i>      text: c.text,</span>
-<span id="src-ingest-ts-L168"><i>168</i>      heading: c.heading,</span>
-<span id="src-ingest-ts-L169"><i>169</i>      order,</span>
-<span id="src-ingest-ts-L170"><i>170</i>      embedding: embeddings[order],</span>
-<span id="src-ingest-ts-L171"><i>171</i>      concepts: concepts[order],</span>
-<span id="src-ingest-ts-L172"><i>172</i>    }));</span>
-<span id="src-ingest-ts-L173"><i>173</i> </span>
-<span id="src-ingest-ts-L174"><i>174</i>    await this.graph.run(</span>
-<span id="src-ingest-ts-L175"><i>175</i>      `MATCH (n:Note {path: $path})</span>
-<span id="src-ingest-ts-L176"><i>176</i>       UNWIND $rows AS row</span>
-<span id="src-ingest-ts-L177" class="hot"><i>177</i>       CREATE (c:Chunk {id: row.id, text: row.text, heading: row.heading, order: row.order, embedding: row.embedding})</span>
-<span id="src-ingest-ts-L178" class="hot"><i>178</i>       CREATE (n)-[:HAS_CHUNK]-&gt;(c)</span>
-<span id="src-ingest-ts-L179" class="hot"><i>179</i>       WITH c, row</span>
-<span id="src-ingest-ts-L180" class="hot"><i>180</i>       UNWIND row.concepts AS name</span>
-<span id="src-ingest-ts-L181" class="hot"><i>181</i>       MERGE (k:Concept {nameLower: toLower(name)}) ON CREATE SET k.name = name</span>
-<span id="src-ingest-ts-L182" class="hot"><i>182</i>       MERGE (c)-[:MENTIONS]-&gt;(k)`,</span>
-<span id="src-ingest-ts-L183" class="hot"><i>183</i>      { path, rows },</span>
-<span id="src-ingest-ts-L184" class="hot"><i>184</i>    );</span>
-<span id="src-ingest-ts-L185"><i>185</i>    await this.graph.run(</span>
-<span id="src-ingest-ts-L186"><i>186</i>      `MATCH (:Note {path: $path})-[:HAS_CHUNK]-&gt;(c:Chunk)</span>
-<span id="src-ingest-ts-L187"><i>187</i>       WITH c ORDER BY c.order</span>
-<span id="src-ingest-ts-L188"><i>188</i>       WITH collect(c) AS cs</span>
-<span id="src-ingest-ts-L189"><i>189</i>       UNWIND range(0, size(cs) - 2) AS i</span>
-<span id="src-ingest-ts-L190"><i>190</i>       WITH cs[i] AS a, cs[i + 1] AS b</span>
-<span id="src-ingest-ts-L191" class="hot"><i>191</i>       MERGE (a)-[:NEXT]-&gt;(b)`,</span>
-<span id="src-ingest-ts-L192"><i>192</i>      { path },</span>
-<span id="src-ingest-ts-L193"><i>193</i>    );</span>
-<span id="src-ingest-ts-L194"><i>194</i>    await this.graph.run(</span>
-<span id="src-ingest-ts-L195"><i>195</i>      `MATCH (:Note {path: $path})-[:HAS_CHUNK]-&gt;(c:Chunk)-[:MENTIONS]-&gt;(a:Concept)</span>
-<span id="src-ingest-ts-L196"><i>196</i>       MATCH (c)-[:MENTIONS]-&gt;(b:Concept)</span>
-<span id="src-ingest-ts-L197"><i>197</i>       WHERE elementId(a) &lt; elementId(b)</span>
-<span id="src-ingest-ts-L198" class="hot"><i>198</i>       MERGE (a)-[:RELATED_TO]-(b)`,</span>
-<span id="src-ingest-ts-L199"><i>199</i>      { path },</span>
-<span id="src-ingest-ts-L200"><i>200</i>    );</span>
-<span id="src-ingest-ts-L201"><i>201</i>  }</span>
-<span id="src-ingest-ts-L202"><i>202</i> </span>
-<span id="src-ingest-ts-L203"><i>203</i>  private async writeLinks(file: TFile) {</span>
-<span id="src-ingest-ts-L204"><i>204</i>    const cache = this.app.metadataCache;</span>
-<span id="src-ingest-ts-L205"><i>205</i>    const resolved = Object.keys(cache.resolvedLinks[file.path] ?? {}).filter((p) =&gt; p.endsWith(".md"));</span>
-<span id="src-ingest-ts-L206"><i>206</i>    await this.graph.run("MATCH (:Note {path: $path})-[r:LINKS_TO]-&gt;() DELETE r", { path: file.path });</span>
-<span id="src-ingest-ts-L207"><i>207</i>    if (resolved.length) {</span>
-<span id="src-ingest-ts-L208"><i>208</i>      await this.graph.run(</span>
-<span id="src-ingest-ts-L209"><i>209</i>        `MATCH (n:Note {path: $path})</span>
-<span id="src-ingest-ts-L210"><i>210</i>         UNWIND $targets AS t</span>
-<span id="src-ingest-ts-L211"><i>211</i>         MERGE (m:Note {path: t.path}) ON CREATE SET m.title = t.title</span>
-<span id="src-ingest-ts-L212"><i>212</i>         MERGE (n)-[:LINKS_TO]-&gt;(m)`,</span>
-<span id="src-ingest-ts-L213"><i>213</i>        {</span>
-<span id="src-ingest-ts-L214"><i>214</i>          path: file.path,</span>
-<span id="src-ingest-ts-L215"><i>215</i>          targets: resolved.map((p) =&gt; ({ path: p, title: p.split("/").pop()!.replace(/\.md$/, "") })),</span>
-<span id="src-ingest-ts-L216"><i>216</i>        },</span>
-<span id="src-ingest-ts-L217"><i>217</i>      );</span>
-<span id="src-ingest-ts-L218"><i>218</i>    }</span>
-<span id="src-ingest-ts-L219"><i>219</i>    const tags = (cache.getFileCache(file)?.tags ?? []).map((t) =&gt; t.tag.replace(/^#/, ""));</span>
-<span id="src-ingest-ts-L220"><i>220</i>    await this.graph.run("MATCH (:Note {path: $path})-[r:TAGGED]-&gt;() DELETE r", { path: file.path });</span>
-<span id="src-ingest-ts-L221"><i>221</i>    if (tags.length) {</span>
-<span id="src-ingest-ts-L222"><i>222</i>      await this.graph.run(</span>
-<span id="src-ingest-ts-L223"><i>223</i>        `MATCH (n:Note {path: $path})</span>
-<span id="src-ingest-ts-L224"><i>224</i>         UNWIND $tags AS tag</span>
-<span id="src-ingest-ts-L225"><i>225</i>         MERGE (t:Tag {name: tag})</span>
-<span id="src-ingest-ts-L226"><i>226</i>         MERGE (n)-[:TAGGED]-&gt;(t)`,</span>
-<span id="src-ingest-ts-L227"><i>227</i>        { path: file.path, tags: [...new Set(tags)] },</span>
-<span id="src-ingest-ts-L228"><i>228</i>      );</span>
-<span id="src-ingest-ts-L229"><i>229</i>    }</span>
-<span id="src-ingest-ts-L230"><i>230</i>  }</span>
-<span id="src-ingest-ts-L231"><i>231</i> </span>
-<span id="src-ingest-ts-L232"><i>232</i>  /** Asks the LLM for key concepts per chunk, in small batches. Failures degrade to no concepts. */</span>
-<span id="src-ingest-ts-L233" class="hot"><i>233</i>  private async extractConcepts(chunks: RawChunk[]): Promise&lt;string[][]&gt; {</span>
-<span id="src-ingest-ts-L234" class="hot"><i>234</i>    const out: string[][] = chunks.map(() =&gt; []);</span>
-<span id="src-ingest-ts-L235" class="hot"><i>235</i>    const BATCH = 5;</span>
-<span id="src-ingest-ts-L236" class="hot"><i>236</i>    for (let i = 0; i &lt; chunks.length; i += BATCH) {</span>
-<span id="src-ingest-ts-L237" class="hot"><i>237</i>      const batch = chunks.slice(i, i + BATCH);</span>
-<span id="src-ingest-ts-L238" class="hot"><i>238</i>      const prompt = batch.map((c, j) =&gt; `[${j}] ${c.text.slice(0, 700)}`).join("\n\n");</span>
-<span id="src-ingest-ts-L239" class="hot"><i>239</i>      try {</span>
-<span id="src-ingest-ts-L240" class="hot"><i>240</i>        const reply = await this.llm.chat(</span>
-<span id="src-ingest-ts-L241" class="hot"><i>241</i>          [</span>
-<span id="src-ingest-ts-L242" class="hot"><i>242</i>            {</span>
-<span id="src-ingest-ts-L243" class="hot"><i>243</i>              role: "system",</span>
-<span id="src-ingest-ts-L244" class="hot"><i>244</i>              content:</span>
-<span id="src-ingest-ts-L245" class="hot"><i>245</i>                'Extract the key concepts from each numbered note excerpt. Reply ONLY with JSON: {"concepts": [[...], [...]]}, one array per excerpt, in order, each with 2-6 short lowercase noun phrases (1-3 words).',</span>
-<span id="src-ingest-ts-L246" class="hot"><i>246</i>            },</span>
-<span id="src-ingest-ts-L247" class="hot"><i>247</i>            { role: "user", content: prompt },</span>
-<span id="src-ingest-ts-L248" class="hot"><i>248</i>          ],</span>
-<span id="src-ingest-ts-L249" class="hot"><i>249</i>          { json: true },</span>
-<span id="src-ingest-ts-L250" class="hot"><i>250</i>        );</span>
-<span id="src-ingest-ts-L251" class="hot"><i>251</i>        const parsed = parseConcepts(reply);</span>
-<span id="src-ingest-ts-L252" class="hot"><i>252</i>        batch.forEach((_, j) =&gt; {</span>
-<span id="src-ingest-ts-L253" class="hot"><i>253</i>          out[i + j] = (parsed[j] ?? []).slice(0, 8);</span>
-<span id="src-ingest-ts-L254" class="hot"><i>254</i>        });</span>
-<span id="src-ingest-ts-L255" class="hot"><i>255</i>      } catch (e) {</span>
-<span id="src-ingest-ts-L256" class="hot"><i>256</i>        console.warn("Graph Recall: concept extraction failed for a batch", e);</span>
-<span id="src-ingest-ts-L257" class="hot"><i>257</i>      }</span>
-<span id="src-ingest-ts-L258" class="hot"><i>258</i>    }</span>
-<span id="src-ingest-ts-L259" class="hot"><i>259</i>    return out;</span>
-<span id="src-ingest-ts-L260" class="hot"><i>260</i>  }</span>
-<span id="src-ingest-ts-L261"><i>261</i>}</span>
-<span id="src-ingest-ts-L262"><i>262</i> </span>
-<span id="src-ingest-ts-L263"><i>263</i>function parseConcepts(reply: string): string[][] {</span>
-<span id="src-ingest-ts-L264"><i>264</i>  const match = /\{[\s\S]*\}/.exec(reply);</span>
-<span id="src-ingest-ts-L265"><i>265</i>  if (!match) return [];</span>
-<span id="src-ingest-ts-L266"><i>266</i>  try {</span>
-<span id="src-ingest-ts-L267"><i>267</i>    const arr = JSON.parse(match[0]).concepts;</span>
-<span id="src-ingest-ts-L268"><i>268</i>    if (!Array.isArray(arr)) return [];</span>
-<span id="src-ingest-ts-L269"><i>269</i>    return arr.map((a: unknown) =&gt;</span>
-<span id="src-ingest-ts-L270"><i>270</i>      Array.isArray(a)</span>
-<span id="src-ingest-ts-L271"><i>271</i>        ? [...new Set(a.filter((x): x is string =&gt; typeof x === "string").map((x) =&gt; x.trim().toLowerCase()).filter((x) =&gt; x.length &gt; 1 &amp;&amp; x.length &lt; 60))]</span>
-<span id="src-ingest-ts-L272"><i>272</i>        : [],</span>
-<span id="src-ingest-ts-L273"><i>273</i>    );</span>
-<span id="src-ingest-ts-L274"><i>274</i>  } catch {</span>
-<span id="src-ingest-ts-L275"><i>275</i>    return [];</span>
-<span id="src-ingest-ts-L276"><i>276</i>  }</span>
-<span id="src-ingest-ts-L277"><i>277</i>}</span></code></pre></details>
+<span id="src-ingest-ts-L155"><i>155</i>    // hash is cleared now and only stored once the note is fully indexed, so a failed run is retried next time</span>
+<span id="src-ingest-ts-L156"><i>156</i>    await this.graph.run(</span>
+<span id="src-ingest-ts-L157"><i>157</i>      "MERGE (n:Note {path: $path}) SET n.title = $title, n.mtime = $mtime, n.hash = null",</span>
+<span id="src-ingest-ts-L158"><i>158</i>      { path, title: file.basename, mtime: file.stat.mtime },</span>
+<span id="src-ingest-ts-L159"><i>159</i>    );</span>
+<span id="src-ingest-ts-L160"><i>160</i>    await this.writeLinks(file);</span>
+<span id="src-ingest-ts-L161"><i>161</i>    const markIndexed = () =&gt;</span>
+<span id="src-ingest-ts-L162"><i>162</i>      this.graph.run("MATCH (n:Note {path: $path}) SET n.hash = $hash", { path, hash: hashText(content) });</span>
+<span id="src-ingest-ts-L163"><i>163</i> </span>
+<span id="src-ingest-ts-L164"><i>164</i>    if (chunks.length === 0) return void (await markIndexed());</span>
+<span id="src-ingest-ts-L165"><i>165</i> </span>
+<span id="src-ingest-ts-L166"><i>166</i>    const embeddings = await this.llm.embed(chunks.map((c) =&gt; (c.heading ? `${c.heading}\n${c.text}` : c.text)));</span>
+<span id="src-ingest-ts-L167"><i>167</i>    const { concepts, failed } = await this.extractConcepts(chunks);</span>
+<span id="src-ingest-ts-L168"><i>168</i>    if (failed &gt; 0) {</span>
+<span id="src-ingest-ts-L169"><i>169</i>      new Notice(`Graph Recall: concept extraction failed for ${failed} chunk(s) in ${file.basename}; it will be retried on the next index.`);</span>
+<span id="src-ingest-ts-L170"><i>170</i>    }</span>
+<span id="src-ingest-ts-L171"><i>171</i>    const rows = chunks.map((c, order) =&gt; ({</span>
+<span id="src-ingest-ts-L172"><i>172</i>      id: `${path}#${order}`,</span>
+<span id="src-ingest-ts-L173"><i>173</i>      text: c.text,</span>
+<span id="src-ingest-ts-L174"><i>174</i>      heading: c.heading,</span>
+<span id="src-ingest-ts-L175"><i>175</i>      order,</span>
+<span id="src-ingest-ts-L176"><i>176</i>      embedding: embeddings[order],</span>
+<span id="src-ingest-ts-L177"><i>177</i>      concepts: concepts[order],</span>
+<span id="src-ingest-ts-L178"><i>178</i>    }));</span>
+<span id="src-ingest-ts-L179"><i>179</i> </span>
+<span id="src-ingest-ts-L180"><i>180</i>    await this.graph.run(</span>
+<span id="src-ingest-ts-L181"><i>181</i>      `MATCH (n:Note {path: $path})</span>
+<span id="src-ingest-ts-L182"><i>182</i>       UNWIND $rows AS row</span>
+<span id="src-ingest-ts-L183" class="hot"><i>183</i>       CREATE (c:Chunk {id: row.id, text: row.text, heading: row.heading, order: row.order, embedding: row.embedding})</span>
+<span id="src-ingest-ts-L184" class="hot"><i>184</i>       CREATE (n)-[:HAS_CHUNK]-&gt;(c)</span>
+<span id="src-ingest-ts-L185" class="hot"><i>185</i>       WITH c, row</span>
+<span id="src-ingest-ts-L186" class="hot"><i>186</i>       UNWIND row.concepts AS name</span>
+<span id="src-ingest-ts-L187" class="hot"><i>187</i>       MERGE (k:Concept {nameLower: toLower(name)}) ON CREATE SET k.name = name</span>
+<span id="src-ingest-ts-L188" class="hot"><i>188</i>       MERGE (c)-[:MENTIONS]-&gt;(k)`,</span>
+<span id="src-ingest-ts-L189" class="hot"><i>189</i>      { path, rows },</span>
+<span id="src-ingest-ts-L190" class="hot"><i>190</i>    );</span>
+<span id="src-ingest-ts-L191"><i>191</i>    await this.graph.run(</span>
+<span id="src-ingest-ts-L192"><i>192</i>      `MATCH (:Note {path: $path})-[:HAS_CHUNK]-&gt;(c:Chunk)</span>
+<span id="src-ingest-ts-L193"><i>193</i>       WITH c ORDER BY c.order</span>
+<span id="src-ingest-ts-L194"><i>194</i>       WITH collect(c) AS cs</span>
+<span id="src-ingest-ts-L195"><i>195</i>       UNWIND range(0, size(cs) - 2) AS i</span>
+<span id="src-ingest-ts-L196"><i>196</i>       WITH cs[i] AS a, cs[i + 1] AS b</span>
+<span id="src-ingest-ts-L197" class="hot"><i>197</i>       MERGE (a)-[:NEXT]-&gt;(b)`,</span>
+<span id="src-ingest-ts-L198"><i>198</i>      { path },</span>
+<span id="src-ingest-ts-L199"><i>199</i>    );</span>
+<span id="src-ingest-ts-L200"><i>200</i>    await this.graph.run(</span>
+<span id="src-ingest-ts-L201"><i>201</i>      `MATCH (:Note {path: $path})-[:HAS_CHUNK]-&gt;(c:Chunk)-[:MENTIONS]-&gt;(a:Concept)</span>
+<span id="src-ingest-ts-L202"><i>202</i>       MATCH (c)-[:MENTIONS]-&gt;(b:Concept)</span>
+<span id="src-ingest-ts-L203"><i>203</i>       WHERE elementId(a) &lt; elementId(b)</span>
+<span id="src-ingest-ts-L204" class="hot"><i>204</i>       MERGE (a)-[:RELATED_TO]-(b)`,</span>
+<span id="src-ingest-ts-L205"><i>205</i>      { path },</span>
+<span id="src-ingest-ts-L206"><i>206</i>    );</span>
+<span id="src-ingest-ts-L207"><i>207</i>    if (failed === 0) await markIndexed();</span>
+<span id="src-ingest-ts-L208"><i>208</i>  }</span>
+<span id="src-ingest-ts-L209"><i>209</i> </span>
+<span id="src-ingest-ts-L210"><i>210</i>  private async writeLinks(file: TFile) {</span>
+<span id="src-ingest-ts-L211"><i>211</i>    const cache = this.app.metadataCache;</span>
+<span id="src-ingest-ts-L212"><i>212</i>    const resolved = Object.keys(cache.resolvedLinks[file.path] ?? {}).filter((p) =&gt; p.endsWith(".md"));</span>
+<span id="src-ingest-ts-L213"><i>213</i>    await this.graph.run("MATCH (:Note {path: $path})-[r:LINKS_TO]-&gt;() DELETE r", { path: file.path });</span>
+<span id="src-ingest-ts-L214"><i>214</i>    if (resolved.length) {</span>
+<span id="src-ingest-ts-L215"><i>215</i>      await this.graph.run(</span>
+<span id="src-ingest-ts-L216"><i>216</i>        `MATCH (n:Note {path: $path})</span>
+<span id="src-ingest-ts-L217"><i>217</i>         UNWIND $targets AS t</span>
+<span id="src-ingest-ts-L218"><i>218</i>         MERGE (m:Note {path: t.path}) ON CREATE SET m.title = t.title</span>
+<span id="src-ingest-ts-L219"><i>219</i>         MERGE (n)-[:LINKS_TO]-&gt;(m)`,</span>
+<span id="src-ingest-ts-L220"><i>220</i>        {</span>
+<span id="src-ingest-ts-L221"><i>221</i>          path: file.path,</span>
+<span id="src-ingest-ts-L222"><i>222</i>          targets: resolved.map((p) =&gt; ({ path: p, title: p.split("/").pop()!.replace(/\.md$/, "") })),</span>
+<span id="src-ingest-ts-L223"><i>223</i>        },</span>
+<span id="src-ingest-ts-L224"><i>224</i>      );</span>
+<span id="src-ingest-ts-L225"><i>225</i>    }</span>
+<span id="src-ingest-ts-L226"><i>226</i>    const tags = (cache.getFileCache(file)?.tags ?? []).map((t) =&gt; t.tag.replace(/^#/, ""));</span>
+<span id="src-ingest-ts-L227"><i>227</i>    await this.graph.run("MATCH (:Note {path: $path})-[r:TAGGED]-&gt;() DELETE r", { path: file.path });</span>
+<span id="src-ingest-ts-L228"><i>228</i>    if (tags.length) {</span>
+<span id="src-ingest-ts-L229"><i>229</i>      await this.graph.run(</span>
+<span id="src-ingest-ts-L230"><i>230</i>        `MATCH (n:Note {path: $path})</span>
+<span id="src-ingest-ts-L231"><i>231</i>         UNWIND $tags AS tag</span>
+<span id="src-ingest-ts-L232"><i>232</i>         MERGE (t:Tag {name: tag})</span>
+<span id="src-ingest-ts-L233"><i>233</i>         MERGE (n)-[:TAGGED]-&gt;(t)`,</span>
+<span id="src-ingest-ts-L234"><i>234</i>        { path: file.path, tags: [...new Set(tags)] },</span>
+<span id="src-ingest-ts-L235"><i>235</i>      );</span>
+<span id="src-ingest-ts-L236"><i>236</i>    }</span>
+<span id="src-ingest-ts-L237"><i>237</i>  }</span>
+<span id="src-ingest-ts-L238"><i>238</i> </span>
+<span id="src-ingest-ts-L239"><i>239</i>  /**</span>
+<span id="src-ingest-ts-L240"><i>240</i>   * Asks the LLM for key concepts, one chunk per call (small local models can't keep several excerpts apart).</span>
+<span id="src-ingest-ts-L241"><i>241</i>   * `failed` counts chunks whose extraction errored or was unparseable after a retry, so the caller can</span>
+<span id="src-ingest-ts-L242"><i>242</i>   * avoid marking the note as fully indexed.</span>
+<span id="src-ingest-ts-L243"><i>243</i>   */</span>
+<span id="src-ingest-ts-L244" class="hot"><i>244</i>  private async extractConcepts(chunks: RawChunk[]): Promise&lt;{ concepts: string[][]; failed: number }&gt; {</span>
+<span id="src-ingest-ts-L245" class="hot"><i>245</i>    const concepts: string[][] = chunks.map(() =&gt; []);</span>
+<span id="src-ingest-ts-L246" class="hot"><i>246</i>    let failed = 0;</span>
+<span id="src-ingest-ts-L247" class="hot"><i>247</i>    let next = 0;</span>
+<span id="src-ingest-ts-L248" class="hot"><i>248</i>    const worker = async () =&gt; {</span>
+<span id="src-ingest-ts-L249" class="hot"><i>249</i>      while (next &lt; chunks.length) {</span>
+<span id="src-ingest-ts-L250" class="hot"><i>250</i>        const i = next++;</span>
+<span id="src-ingest-ts-L251" class="hot"><i>251</i>        const got = await this.extractOne(chunks[i]);</span>
+<span id="src-ingest-ts-L252" class="hot"><i>252</i>        if (got === null) failed++;</span>
+<span id="src-ingest-ts-L253" class="hot"><i>253</i>        else concepts[i] = got;</span>
+<span id="src-ingest-ts-L254" class="hot"><i>254</i>      }</span>
+<span id="src-ingest-ts-L255" class="hot"><i>255</i>    };</span>
+<span id="src-ingest-ts-L256" class="hot"><i>256</i>    await Promise.all(Array.from({ length: CONCEPT_CONCURRENCY }, worker));</span>
+<span id="src-ingest-ts-L257" class="hot"><i>257</i>    return { concepts, failed };</span>
+<span id="src-ingest-ts-L258" class="hot"><i>258</i>  }</span>
+<span id="src-ingest-ts-L259" class="hot"><i>259</i> </span>
+<span id="src-ingest-ts-L260"><i>260</i>  private async extractOne(chunk: RawChunk): Promise&lt;string[] | null&gt; {</span>
+<span id="src-ingest-ts-L261"><i>261</i>    for (let attempt = 0; attempt &lt; 2; attempt++) {</span>
+<span id="src-ingest-ts-L262"><i>262</i>      try {</span>
+<span id="src-ingest-ts-L263"><i>263</i>        const reply = await this.llm.chat(</span>
+<span id="src-ingest-ts-L264"><i>264</i>          [</span>
+<span id="src-ingest-ts-L265"><i>265</i>            {</span>
+<span id="src-ingest-ts-L266"><i>266</i>              role: "system",</span>
+<span id="src-ingest-ts-L267"><i>267</i>              content:</span>
+<span id="src-ingest-ts-L268"><i>268</i>                'Extract 2-6 key concepts from the note excerpt. Reply ONLY with JSON: {"concepts": ["concept one", "concept two"]}. Each concept is a short lowercase noun phrase (1-3 words).',</span>
+<span id="src-ingest-ts-L269"><i>269</i>            },</span>
+<span id="src-ingest-ts-L270"><i>270</i>            { role: "user", content: chunk.text.slice(0, 1500) },</span>
+<span id="src-ingest-ts-L271"><i>271</i>          ],</span>
+<span id="src-ingest-ts-L272"><i>272</i>          { json: true, maxTokens: 200 },</span>
+<span id="src-ingest-ts-L273"><i>273</i>        );</span>
+<span id="src-ingest-ts-L274"><i>274</i>        const parsed = parseConcepts(reply);</span>
+<span id="src-ingest-ts-L275"><i>275</i>        if (parsed) return parsed;</span>
+<span id="src-ingest-ts-L276"><i>276</i>      } catch (e) {</span>
+<span id="src-ingest-ts-L277"><i>277</i>        console.warn("Graph Recall: concept extraction failed", e);</span>
+<span id="src-ingest-ts-L278"><i>278</i>      }</span>
+<span id="src-ingest-ts-L279"><i>279</i>    }</span>
+<span id="src-ingest-ts-L280"><i>280</i>    return null;</span>
+<span id="src-ingest-ts-L281"><i>281</i>  }</span>
+<span id="src-ingest-ts-L282"><i>282</i>}</span>
+<span id="src-ingest-ts-L283"><i>283</i> </span>
+<span id="src-ingest-ts-L284"><i>284</i>const CONCEPT_CONCURRENCY = 3;</span>
+<span id="src-ingest-ts-L285"><i>285</i> </span>
+<span id="src-ingest-ts-L286"><i>286</i>/** Returns null if the reply has no usable `concepts` field. Tolerates strings or {concept|name|term} objects. */</span>
+<span id="src-ingest-ts-L287" class="hot"><i>287</i>export function parseConcepts(reply: string): string[] | null {</span>
+<span id="src-ingest-ts-L288" class="hot"><i>288</i>  const match = /[{[][\s\S]*[}\]]/.exec(reply);</span>
+<span id="src-ingest-ts-L289" class="hot"><i>289</i>  if (!match) return null;</span>
+<span id="src-ingest-ts-L290" class="hot"><i>290</i>  let raw: unknown;</span>
+<span id="src-ingest-ts-L291" class="hot"><i>291</i>  try {</span>
+<span id="src-ingest-ts-L292" class="hot"><i>292</i>    const parsed = JSON.parse(match[0]);</span>
+<span id="src-ingest-ts-L293" class="hot"><i>293</i>    raw = Array.isArray(parsed) ? parsed : parsed?.concepts;</span>
+<span id="src-ingest-ts-L294" class="hot"><i>294</i>  } catch {</span>
+<span id="src-ingest-ts-L295" class="hot"><i>295</i>    return null;</span>
+<span id="src-ingest-ts-L296" class="hot"><i>296</i>  }</span>
+<span id="src-ingest-ts-L297" class="hot"><i>297</i>  if (!Array.isArray(raw)) return null;</span>
+<span id="src-ingest-ts-L298" class="hot"><i>298</i>  const names = raw.map((x: unknown) =&gt; {</span>
+<span id="src-ingest-ts-L299" class="hot"><i>299</i>    if (typeof x === "string") return x;</span>
+<span id="src-ingest-ts-L300" class="hot"><i>300</i>    if (x &amp;&amp; typeof x === "object") {</span>
+<span id="src-ingest-ts-L301" class="hot"><i>301</i>      const o = x as Record&lt;string, unknown&gt;;</span>
+<span id="src-ingest-ts-L302" class="hot"><i>302</i>      const v = o.concept ?? o.name ?? o.term ?? o.title;</span>
+<span id="src-ingest-ts-L303" class="hot"><i>303</i>      return typeof v === "string" ? v : "";</span>
+<span id="src-ingest-ts-L304" class="hot"><i>304</i>    }</span>
+<span id="src-ingest-ts-L305" class="hot"><i>305</i>    return "";</span>
+<span id="src-ingest-ts-L306" class="hot"><i>306</i>  });</span>
+<span id="src-ingest-ts-L307" class="hot"><i>307</i>  const clean = names.map((n) =&gt; n.trim().toLowerCase()).filter((n) =&gt; n.length &gt; 1 &amp;&amp; n.length &lt; 60);</span>
+<span id="src-ingest-ts-L308" class="hot"><i>308</i>  return [...new Set(clean)].slice(0, 8);</span>
+<span id="src-ingest-ts-L309" class="hot"><i>309</i>}</span></code></pre></details>
 </section>
 
 <section id="src-neo4j-ts" class="card">
@@ -792,10 +824,10 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 </section>
 
 <section id="src-llm-ts" class="card">
-  <div class="head"><span class="num">5</span><h2>src/llm.ts</h2><span class="lines">105 lines</span></div>
+  <div class="head"><span class="num">5</span><h2>src/llm.ts</h2><span class="lines">108 lines</span></div>
   <p class="role">Provider-agnostic model client.</p>
   <p>One client for any OpenAI-compatible API: embeddings, streaming chat, transcription.</p>
-  <div class="box focus"><h4>Focus here</h4><ul><li><a href="#src-llm-ts-L29">L29</a> Batches inputs 32 at a time to /embeddings.</li><li><a href="#src-llm-ts-L45">L45</a> Non-streaming returns JSON; streaming parses Server-Sent Events. response_format json_object is used for concept extraction.</li><li><a href="#src-llm-ts-L97">L97</a> Multipart upload to /audio/transcriptions.</li></ul></div>
+  <div class="box focus"><h4>Focus here</h4><ul><li><a href="#src-llm-ts-L31">L31</a> Batches inputs 32 at a time to /embeddings.</li><li><a href="#src-llm-ts-L47">L47</a> Non-streaming returns JSON; streaming parses Server-Sent Events. response_format json_object and max_tokens are used for concept extraction (max_tokens stops small models looping until the server aborts).</li><li><a href="#src-llm-ts-L100">L100</a> Multipart upload to /audio/transcriptions.</li></ul></div>
   <div class="box say"><h4>Say this when explaining</h4><ul><li>Ollama exposes an OpenAI-compatible API, so provider switching is only a base URL, a key and model names. No framework required.</li></ul></div>
   <div class="box watch"><h4>Honest caveats</h4><ul><li>Uses fetch, so it relies on the provider allowing Obsidian's app:// origin (CORS). I believe Ollama's defaults allow it, but that is unverified here.</li><li>Whether local models honour response_format json_object varies; parsing is defensive.</li></ul></div>
   <details><summary>Full source</summary><pre><code><span id="src-llm-ts-L1"><i>1</i>import type { GraphRecallSettings } from "./settings";</span>
@@ -807,102 +839,105 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-llm-ts-L7"><i>7</i> </span>
 <span id="src-llm-ts-L8"><i>8</i>interface ChatOpts {</span>
 <span id="src-llm-ts-L9"><i>9</i>  json?: boolean;</span>
-<span id="src-llm-ts-L10"><i>10</i>  onToken?: (t: string) =&gt; void;</span>
-<span id="src-llm-ts-L11"><i>11</i>  signal?: AbortSignal;</span>
-<span id="src-llm-ts-L12"><i>12</i>}</span>
-<span id="src-llm-ts-L13"><i>13</i> </span>
-<span id="src-llm-ts-L14"><i>14</i>/** Thin client for any OpenAI-compatible API (Ollama exposes one at /v1). */</span>
-<span id="src-llm-ts-L15"><i>15</i>export class Llm {</span>
-<span id="src-llm-ts-L16"><i>16</i>  constructor(private s: () =&gt; GraphRecallSettings) {}</span>
-<span id="src-llm-ts-L17"><i>17</i> </span>
-<span id="src-llm-ts-L18"><i>18</i>  private headers(extra: Record&lt;string, string&gt; = {}) {</span>
-<span id="src-llm-ts-L19"><i>19</i>    const { apiKey } = this.s();</span>
-<span id="src-llm-ts-L20"><i>20</i>    return { ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}), ...extra };</span>
-<span id="src-llm-ts-L21"><i>21</i>  }</span>
-<span id="src-llm-ts-L22"><i>22</i> </span>
-<span id="src-llm-ts-L23"><i>23</i>  private async post(base: string, path: string, body: BodyInit, headers: Record&lt;string, string&gt;, signal?: AbortSignal) {</span>
-<span id="src-llm-ts-L24"><i>24</i>    const res = await fetch(`${base.replace(/\/$/, "")}${path}`, { method: "POST", body, headers, signal });</span>
-<span id="src-llm-ts-L25"><i>25</i>    if (!res.ok) throw new Error(`${path} failed (${res.status}): ${(await res.text()).slice(0, 300)}`);</span>
-<span id="src-llm-ts-L26"><i>26</i>    return res;</span>
-<span id="src-llm-ts-L27"><i>27</i>  }</span>
-<span id="src-llm-ts-L28"><i>28</i> </span>
-<span id="src-llm-ts-L29" class="hot"><i>29</i>  async embed(inputs: string[]): Promise&lt;number[][]&gt; {</span>
-<span id="src-llm-ts-L30" class="hot"><i>30</i>    const s = this.s();</span>
-<span id="src-llm-ts-L31" class="hot"><i>31</i>    const out: number[][] = [];</span>
-<span id="src-llm-ts-L32" class="hot"><i>32</i>    for (let i = 0; i &lt; inputs.length; i += 32) {</span>
-<span id="src-llm-ts-L33" class="hot"><i>33</i>      const res = await this.post(</span>
-<span id="src-llm-ts-L34" class="hot"><i>34</i>        s.baseURL,</span>
-<span id="src-llm-ts-L35" class="hot"><i>35</i>        "/embeddings",</span>
-<span id="src-llm-ts-L36" class="hot"><i>36</i>        JSON.stringify({ model: s.embedModel, input: inputs.slice(i, i + 32) }),</span>
-<span id="src-llm-ts-L37" class="hot"><i>37</i>        this.headers({ "Content-Type": "application/json" }),</span>
-<span id="src-llm-ts-L38" class="hot"><i>38</i>      );</span>
-<span id="src-llm-ts-L39" class="hot"><i>39</i>      const json = await res.json();</span>
-<span id="src-llm-ts-L40" class="hot"><i>40</i>      for (const d of json.data) out.push(d.embedding);</span>
-<span id="src-llm-ts-L41" class="hot"><i>41</i>    }</span>
-<span id="src-llm-ts-L42" class="hot"><i>42</i>    return out;</span>
-<span id="src-llm-ts-L43"><i>43</i>  }</span>
-<span id="src-llm-ts-L44"><i>44</i> </span>
-<span id="src-llm-ts-L45" class="hot"><i>45</i>  async chat(messages: ChatMessage[], opts: ChatOpts = {}): Promise&lt;string&gt; {</span>
-<span id="src-llm-ts-L46" class="hot"><i>46</i>    const s = this.s();</span>
-<span id="src-llm-ts-L47" class="hot"><i>47</i>    const stream = !!opts.onToken;</span>
-<span id="src-llm-ts-L48" class="hot"><i>48</i>    const res = await this.post(</span>
-<span id="src-llm-ts-L49" class="hot"><i>49</i>      s.baseURL,</span>
-<span id="src-llm-ts-L50" class="hot"><i>50</i>      "/chat/completions",</span>
-<span id="src-llm-ts-L51" class="hot"><i>51</i>      JSON.stringify({</span>
-<span id="src-llm-ts-L52" class="hot"><i>52</i>        model: s.chatModel,</span>
-<span id="src-llm-ts-L53" class="hot"><i>53</i>        messages,</span>
-<span id="src-llm-ts-L54" class="hot"><i>54</i>        stream,</span>
-<span id="src-llm-ts-L55" class="hot"><i>55</i>        temperature: 0.2,</span>
-<span id="src-llm-ts-L56" class="hot"><i>56</i>        ...(opts.json ? { response_format: { type: "json_object" } } : {}),</span>
-<span id="src-llm-ts-L57" class="hot"><i>57</i>      }),</span>
-<span id="src-llm-ts-L58" class="hot"><i>58</i>      this.headers({ "Content-Type": "application/json" }),</span>
-<span id="src-llm-ts-L59" class="hot"><i>59</i>      opts.signal,</span>
-<span id="src-llm-ts-L60" class="hot"><i>60</i>    );</span>
-<span id="src-llm-ts-L61" class="hot"><i>61</i> </span>
-<span id="src-llm-ts-L62" class="hot"><i>62</i>    if (!stream) return (await res.json()).choices[0].message.content ?? "";</span>
-<span id="src-llm-ts-L63" class="hot"><i>63</i> </span>
-<span id="src-llm-ts-L64" class="hot"><i>64</i>    const reader = res.body!.getReader();</span>
-<span id="src-llm-ts-L65" class="hot"><i>65</i>    const decoder = new TextDecoder();</span>
-<span id="src-llm-ts-L66" class="hot"><i>66</i>    let buf = "";</span>
-<span id="src-llm-ts-L67" class="hot"><i>67</i>    let full = "";</span>
-<span id="src-llm-ts-L68" class="hot"><i>68</i>    for (;;) {</span>
-<span id="src-llm-ts-L69" class="hot"><i>69</i>      const { done, value } = await reader.read();</span>
-<span id="src-llm-ts-L70" class="hot"><i>70</i>      if (done) break;</span>
-<span id="src-llm-ts-L71" class="hot"><i>71</i>      buf += decoder.decode(value, { stream: true });</span>
-<span id="src-llm-ts-L72" class="hot"><i>72</i>      const lines = buf.split("\n");</span>
-<span id="src-llm-ts-L73" class="hot"><i>73</i>      buf = lines.pop() ?? "";</span>
-<span id="src-llm-ts-L74" class="hot"><i>74</i>      for (const line of lines) {</span>
-<span id="src-llm-ts-L75" class="hot"><i>75</i>        const l = line.trim();</span>
-<span id="src-llm-ts-L76" class="hot"><i>76</i>        if (!l.startsWith("data:")) continue;</span>
-<span id="src-llm-ts-L77" class="hot"><i>77</i>        const data = l.slice(5).trim();</span>
-<span id="src-llm-ts-L78" class="hot"><i>78</i>        if (data === "[DONE]") continue;</span>
-<span id="src-llm-ts-L79" class="hot"><i>79</i>        try {</span>
-<span id="src-llm-ts-L80" class="hot"><i>80</i>          const tok = JSON.parse(data).choices?.[0]?.delta?.content;</span>
-<span id="src-llm-ts-L81" class="hot"><i>81</i>          if (tok) {</span>
-<span id="src-llm-ts-L82" class="hot"><i>82</i>            full += tok;</span>
-<span id="src-llm-ts-L83" class="hot"><i>83</i>            opts.onToken!(tok);</span>
-<span id="src-llm-ts-L84" class="hot"><i>84</i>          }</span>
-<span id="src-llm-ts-L85" class="hot"><i>85</i>        } catch {</span>
-<span id="src-llm-ts-L86" class="hot"><i>86</i>          /* partial JSON line, ignore */</span>
-<span id="src-llm-ts-L87" class="hot"><i>87</i>        }</span>
-<span id="src-llm-ts-L88" class="hot"><i>88</i>      }</span>
-<span id="src-llm-ts-L89" class="hot"><i>89</i>    }</span>
-<span id="src-llm-ts-L90" class="hot"><i>90</i>    return full;</span>
-<span id="src-llm-ts-L91" class="hot"><i>91</i>  }</span>
-<span id="src-llm-ts-L92" class="hot"><i>92</i> </span>
-<span id="src-llm-ts-L93"><i>93</i>  get canTranscribe(): boolean {</span>
-<span id="src-llm-ts-L94"><i>94</i>    return !!this.s().sttBaseURL;</span>
-<span id="src-llm-ts-L95"><i>95</i>  }</span>
-<span id="src-llm-ts-L96"><i>96</i> </span>
-<span id="src-llm-ts-L97" class="hot"><i>97</i>  async transcribe(audio: Blob): Promise&lt;string&gt; {</span>
-<span id="src-llm-ts-L98" class="hot"><i>98</i>    const s = this.s();</span>
-<span id="src-llm-ts-L99" class="hot"><i>99</i>    const form = new FormData();</span>
-<span id="src-llm-ts-L100" class="hot"><i>100</i>    form.append("file", audio, "audio.webm");</span>
-<span id="src-llm-ts-L101" class="hot"><i>101</i>    form.append("model", s.sttModel);</span>
-<span id="src-llm-ts-L102" class="hot"><i>102</i>    const res = await this.post(s.sttBaseURL, "/audio/transcriptions", form, this.headers());</span>
-<span id="src-llm-ts-L103" class="hot"><i>103</i>    return ((await res.json()).text ?? "").trim();</span>
-<span id="src-llm-ts-L104" class="hot"><i>104</i>  }</span>
-<span id="src-llm-ts-L105"><i>105</i>}</span></code></pre></details>
+<span id="src-llm-ts-L10"><i>10</i>  /** Caps output length; stops small models from looping until the server aborts. */</span>
+<span id="src-llm-ts-L11"><i>11</i>  maxTokens?: number;</span>
+<span id="src-llm-ts-L12"><i>12</i>  onToken?: (t: string) =&gt; void;</span>
+<span id="src-llm-ts-L13"><i>13</i>  signal?: AbortSignal;</span>
+<span id="src-llm-ts-L14"><i>14</i>}</span>
+<span id="src-llm-ts-L15"><i>15</i> </span>
+<span id="src-llm-ts-L16"><i>16</i>/** Thin client for any OpenAI-compatible API (Ollama exposes one at /v1). */</span>
+<span id="src-llm-ts-L17"><i>17</i>export class Llm {</span>
+<span id="src-llm-ts-L18"><i>18</i>  constructor(private s: () =&gt; GraphRecallSettings) {}</span>
+<span id="src-llm-ts-L19"><i>19</i> </span>
+<span id="src-llm-ts-L20"><i>20</i>  private headers(extra: Record&lt;string, string&gt; = {}) {</span>
+<span id="src-llm-ts-L21"><i>21</i>    const { apiKey } = this.s();</span>
+<span id="src-llm-ts-L22"><i>22</i>    return { ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}), ...extra };</span>
+<span id="src-llm-ts-L23"><i>23</i>  }</span>
+<span id="src-llm-ts-L24"><i>24</i> </span>
+<span id="src-llm-ts-L25"><i>25</i>  private async post(base: string, path: string, body: BodyInit, headers: Record&lt;string, string&gt;, signal?: AbortSignal) {</span>
+<span id="src-llm-ts-L26"><i>26</i>    const res = await fetch(`${base.replace(/\/$/, "")}${path}`, { method: "POST", body, headers, signal });</span>
+<span id="src-llm-ts-L27"><i>27</i>    if (!res.ok) throw new Error(`${path} failed (${res.status}): ${(await res.text()).slice(0, 300)}`);</span>
+<span id="src-llm-ts-L28"><i>28</i>    return res;</span>
+<span id="src-llm-ts-L29"><i>29</i>  }</span>
+<span id="src-llm-ts-L30"><i>30</i> </span>
+<span id="src-llm-ts-L31" class="hot"><i>31</i>  async embed(inputs: string[]): Promise&lt;number[][]&gt; {</span>
+<span id="src-llm-ts-L32" class="hot"><i>32</i>    const s = this.s();</span>
+<span id="src-llm-ts-L33" class="hot"><i>33</i>    const out: number[][] = [];</span>
+<span id="src-llm-ts-L34" class="hot"><i>34</i>    for (let i = 0; i &lt; inputs.length; i += 32) {</span>
+<span id="src-llm-ts-L35" class="hot"><i>35</i>      const res = await this.post(</span>
+<span id="src-llm-ts-L36" class="hot"><i>36</i>        s.baseURL,</span>
+<span id="src-llm-ts-L37" class="hot"><i>37</i>        "/embeddings",</span>
+<span id="src-llm-ts-L38" class="hot"><i>38</i>        JSON.stringify({ model: s.embedModel, input: inputs.slice(i, i + 32) }),</span>
+<span id="src-llm-ts-L39" class="hot"><i>39</i>        this.headers({ "Content-Type": "application/json" }),</span>
+<span id="src-llm-ts-L40" class="hot"><i>40</i>      );</span>
+<span id="src-llm-ts-L41" class="hot"><i>41</i>      const json = await res.json();</span>
+<span id="src-llm-ts-L42" class="hot"><i>42</i>      for (const d of json.data) out.push(d.embedding);</span>
+<span id="src-llm-ts-L43" class="hot"><i>43</i>    }</span>
+<span id="src-llm-ts-L44" class="hot"><i>44</i>    return out;</span>
+<span id="src-llm-ts-L45"><i>45</i>  }</span>
+<span id="src-llm-ts-L46"><i>46</i> </span>
+<span id="src-llm-ts-L47" class="hot"><i>47</i>  async chat(messages: ChatMessage[], opts: ChatOpts = {}): Promise&lt;string&gt; {</span>
+<span id="src-llm-ts-L48" class="hot"><i>48</i>    const s = this.s();</span>
+<span id="src-llm-ts-L49" class="hot"><i>49</i>    const stream = !!opts.onToken;</span>
+<span id="src-llm-ts-L50" class="hot"><i>50</i>    const res = await this.post(</span>
+<span id="src-llm-ts-L51" class="hot"><i>51</i>      s.baseURL,</span>
+<span id="src-llm-ts-L52" class="hot"><i>52</i>      "/chat/completions",</span>
+<span id="src-llm-ts-L53" class="hot"><i>53</i>      JSON.stringify({</span>
+<span id="src-llm-ts-L54" class="hot"><i>54</i>        model: s.chatModel,</span>
+<span id="src-llm-ts-L55" class="hot"><i>55</i>        messages,</span>
+<span id="src-llm-ts-L56" class="hot"><i>56</i>        stream,</span>
+<span id="src-llm-ts-L57" class="hot"><i>57</i>        temperature: 0.2,</span>
+<span id="src-llm-ts-L58" class="hot"><i>58</i>        ...(opts.json ? { response_format: { type: "json_object" } } : {}),</span>
+<span id="src-llm-ts-L59" class="hot"><i>59</i>        ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),</span>
+<span id="src-llm-ts-L60" class="hot"><i>60</i>      }),</span>
+<span id="src-llm-ts-L61" class="hot"><i>61</i>      this.headers({ "Content-Type": "application/json" }),</span>
+<span id="src-llm-ts-L62" class="hot"><i>62</i>      opts.signal,</span>
+<span id="src-llm-ts-L63" class="hot"><i>63</i>    );</span>
+<span id="src-llm-ts-L64" class="hot"><i>64</i> </span>
+<span id="src-llm-ts-L65" class="hot"><i>65</i>    if (!stream) return (await res.json()).choices[0].message.content ?? "";</span>
+<span id="src-llm-ts-L66" class="hot"><i>66</i> </span>
+<span id="src-llm-ts-L67" class="hot"><i>67</i>    const reader = res.body!.getReader();</span>
+<span id="src-llm-ts-L68" class="hot"><i>68</i>    const decoder = new TextDecoder();</span>
+<span id="src-llm-ts-L69" class="hot"><i>69</i>    let buf = "";</span>
+<span id="src-llm-ts-L70" class="hot"><i>70</i>    let full = "";</span>
+<span id="src-llm-ts-L71" class="hot"><i>71</i>    for (;;) {</span>
+<span id="src-llm-ts-L72" class="hot"><i>72</i>      const { done, value } = await reader.read();</span>
+<span id="src-llm-ts-L73" class="hot"><i>73</i>      if (done) break;</span>
+<span id="src-llm-ts-L74" class="hot"><i>74</i>      buf += decoder.decode(value, { stream: true });</span>
+<span id="src-llm-ts-L75" class="hot"><i>75</i>      const lines = buf.split("\n");</span>
+<span id="src-llm-ts-L76" class="hot"><i>76</i>      buf = lines.pop() ?? "";</span>
+<span id="src-llm-ts-L77" class="hot"><i>77</i>      for (const line of lines) {</span>
+<span id="src-llm-ts-L78" class="hot"><i>78</i>        const l = line.trim();</span>
+<span id="src-llm-ts-L79" class="hot"><i>79</i>        if (!l.startsWith("data:")) continue;</span>
+<span id="src-llm-ts-L80" class="hot"><i>80</i>        const data = l.slice(5).trim();</span>
+<span id="src-llm-ts-L81" class="hot"><i>81</i>        if (data === "[DONE]") continue;</span>
+<span id="src-llm-ts-L82" class="hot"><i>82</i>        try {</span>
+<span id="src-llm-ts-L83" class="hot"><i>83</i>          const tok = JSON.parse(data).choices?.[0]?.delta?.content;</span>
+<span id="src-llm-ts-L84" class="hot"><i>84</i>          if (tok) {</span>
+<span id="src-llm-ts-L85" class="hot"><i>85</i>            full += tok;</span>
+<span id="src-llm-ts-L86" class="hot"><i>86</i>            opts.onToken!(tok);</span>
+<span id="src-llm-ts-L87" class="hot"><i>87</i>          }</span>
+<span id="src-llm-ts-L88" class="hot"><i>88</i>        } catch {</span>
+<span id="src-llm-ts-L89" class="hot"><i>89</i>          /* partial JSON line, ignore */</span>
+<span id="src-llm-ts-L90" class="hot"><i>90</i>        }</span>
+<span id="src-llm-ts-L91" class="hot"><i>91</i>      }</span>
+<span id="src-llm-ts-L92" class="hot"><i>92</i>    }</span>
+<span id="src-llm-ts-L93" class="hot"><i>93</i>    return full;</span>
+<span id="src-llm-ts-L94" class="hot"><i>94</i>  }</span>
+<span id="src-llm-ts-L95" class="hot"><i>95</i> </span>
+<span id="src-llm-ts-L96" class="hot"><i>96</i>  get canTranscribe(): boolean {</span>
+<span id="src-llm-ts-L97"><i>97</i>    return !!this.s().sttBaseURL;</span>
+<span id="src-llm-ts-L98"><i>98</i>  }</span>
+<span id="src-llm-ts-L99"><i>99</i> </span>
+<span id="src-llm-ts-L100" class="hot"><i>100</i>  async transcribe(audio: Blob): Promise&lt;string&gt; {</span>
+<span id="src-llm-ts-L101" class="hot"><i>101</i>    const s = this.s();</span>
+<span id="src-llm-ts-L102" class="hot"><i>102</i>    const form = new FormData();</span>
+<span id="src-llm-ts-L103" class="hot"><i>103</i>    form.append("file", audio, "audio.webm");</span>
+<span id="src-llm-ts-L104" class="hot"><i>104</i>    form.append("model", s.sttModel);</span>
+<span id="src-llm-ts-L105" class="hot"><i>105</i>    const res = await this.post(s.sttBaseURL, "/audio/transcriptions", form, this.headers());</span>
+<span id="src-llm-ts-L106" class="hot"><i>106</i>    return ((await res.json()).text ?? "").trim();</span>
+<span id="src-llm-ts-L107" class="hot"><i>107</i>  }</span>
+<span id="src-llm-ts-L108"><i>108</i>}</span></code></pre></details>
 </section>
 
 <section id="src-settings-ts" class="card">
@@ -1348,14 +1383,31 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
   "version": "0.1.0",
   "minAppVersion": "1.5.0",
   "description": "Ask your vault questions. GraphRAG over your notes, powered by Neo4j, with a visual answer subgraph.",
-  "author": "Graph Recall",
+  "author": "Prateik Lohani",
   "isDesktopOnly": true
 }
 </code></pre></details>
 <details><summary>esbuild.config.mjs</summary><pre><code>import esbuild from "esbuild";
 import process from "process";
+import { copyFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 
 const production = process.argv[2] === "production";
+
+// Obsidian loads main.js, manifest.json and styles.css from the plugin's folder.
+// Point OBSIDIAN_PLUGIN_DIR at &lt;vault&gt;/.obsidian/plugins/graph-recall to build straight into a vault;
+// otherwise output goes to ./dist so the repo root stays free of generated files.
+const outDir = process.env.OBSIDIAN_PLUGIN_DIR || "dist";
+
+const copyStatics = {
+  name: "copy-statics",
+  setup(build) {
+    build.onEnd(() =&gt; {
+      mkdirSync(outDir, { recursive: true });
+      for (const f of ["manifest.json", "styles.css"]) copyFileSync(f, join(outDir, f));
+    });
+  },
+};
 
 const ctx = await esbuild.context({
   entryPoints: ["main.ts"],
@@ -1369,7 +1421,8 @@ const ctx = await esbuild.context({
   sourcemap: production ? false : "inline",
   minify: production,
   treeShaking: true,
-  outfile: "main.js",
+  outfile: join(outDir, "main.js"),
+  plugins: [copyStatics],
 });
 
 if (production) {
