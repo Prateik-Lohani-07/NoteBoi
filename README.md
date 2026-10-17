@@ -1,8 +1,8 @@
-# Graph Recall
+# NoteBoi
 
 Ask your Obsidian vault questions and see *why* an answer was found.
 
-You write notes whenever you learn something, then forget them. Graph Recall indexes your vault into a
+You write notes whenever you learn something, then forget them. NoteBoi indexes your vault into a
 [Neo4j](https://neo4j.com) graph, answers questions from your own notes with citations, and draws the
 subgraph it used, so you can see which notes matched directly and which were reached by following the graph.
 
@@ -54,14 +54,14 @@ npm install
 docker compose up -d          # Neo4j on bolt://localhost:7687 (user neo4j, password graphrecall)
 
 # build straight into a vault
-OBSIDIAN_PLUGIN_DIR="/path/to/vault/.obsidian/plugins/graph-recall" npm run build
+OBSIDIAN_PLUGIN_DIR="/path/to/vault/.obsidian/plugins/noteboi" npm run build
 ```
 
-Then in Obsidian: Settings, Community plugins, turn off Restricted mode, refresh, and enable **Graph Recall**.
+Then in Obsidian: Settings, Community plugins, turn off Restricted mode, refresh, and enable **NoteBoi**.
 
-1. Settings, Graph Recall: pick a provider (Ollama or OpenAI) and, for OpenAI, paste your API key.
+1. Settings, NoteBoi: pick a provider (Ollama or OpenAI) and, for OpenAI, paste your API key.
 2. Click **Test** under Neo4j. You should see "Neo4j connection OK".
-3. Run the command **Graph Recall: Index vault**.
+3. Run the command **NoteBoi: Index vault**.
 4. Click the ribbon icon, ask a question.
 
 Without `OBSIDIAN_PLUGIN_DIR` the build goes to `./dist`; copy `main.js`, `manifest.json` and `styles.css` into the plugin folder yourself.

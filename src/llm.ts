@@ -1,4 +1,4 @@
-import type { GraphRecallSettings } from "./settings";
+import type { NoteBoiSettings } from "./settings";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -15,7 +15,7 @@ interface ChatOpts {
 
 /** Thin client for any OpenAI-compatible API (Ollama exposes one at /v1). */
 export class Llm {
-  constructor(private s: () => GraphRecallSettings) {}
+  constructor(private s: () => NoteBoiSettings) {}
 
   private headers(extra: Record<string, string> = {}) {
     const { apiKey } = this.s();

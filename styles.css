@@ -1,4 +1,4 @@
-.graph-recall { display: flex; flex-direction: column; height: 100%; padding: 8px; gap: 8px; }
+.noteboi { display: flex; flex-direction: column; height: 100%; padding: 8px; gap: 8px; }
 .gr-log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
 .gr-hint { color: var(--text-muted); font-size: var(--font-ui-small); }
 .gr-msg { padding: 8px 10px; border-radius: 8px; }

@@ -1,9 +1,9 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
-import type GraphRecallPlugin from "../main";
+import type NoteBoiPlugin from "../main";
 
 export type Provider = "ollama" | "openai" | "custom";
 
-export interface GraphRecallSettings {
+export interface NoteBoiSettings {
   provider: Provider;
   baseURL: string;
   apiKey: string;
@@ -19,7 +19,7 @@ export interface GraphRecallSettings {
 }
 
 type Preset = Pick<
-  GraphRecallSettings,
+  NoteBoiSettings,
   "baseURL" | "apiKey" | "chatModel" | "embedModel" | "sttBaseURL" | "sttModel"
 >;
 
@@ -43,7 +43,7 @@ export const PRESETS: Record<Exclude<Provider, "custom">, Preset> = {
   },
 };
 
-export const DEFAULT_SETTINGS: GraphRecallSettings = {
+export const DEFAULT_SETTINGS: NoteBoiSettings = {
   provider: "ollama",
   ...PRESETS.ollama,
   neo4jUri: "bolt://localhost:7687",
@@ -53,8 +53,8 @@ export const DEFAULT_SETTINGS: GraphRecallSettings = {
   autoIndex: true,
 };
 
-export class GraphRecallSettingTab extends PluginSettingTab {
-  constructor(app: App, private plugin: GraphRecallPlugin) {
+export class NoteBoiSettingTab extends PluginSettingTab {
+  constructor(app: App, private plugin: NoteBoiPlugin) {
     super(app, plugin);
   }
 
@@ -85,7 +85,7 @@ export class GraphRecallSettingTab extends PluginSettingTab {
           }),
       );
 
-    const text = (name: string, key: keyof GraphRecallSettings, desc = "", secret = false) =>
+    const text = (name: string, key: keyof NoteBoiSettings, desc = "", secret = false) =>
       new Setting(containerEl)
         .setName(name)
         .setDesc(desc)

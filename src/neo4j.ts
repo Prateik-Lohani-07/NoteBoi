@@ -1,5 +1,5 @@
 import neo4j, { Driver, Record as Neo4jRecord } from "neo4j-driver";
-import type { GraphRecallSettings } from "./settings";
+import type { NoteBoiSettings } from "./settings";
 
 const OUR_LABELS = ["Note", "Chunk", "Concept", "Tag", "Meta"];
 
@@ -8,7 +8,7 @@ export class Graph {
   private driver: Driver | null = null;
   private key = "";
 
-  constructor(private s: () => GraphRecallSettings) {}
+  constructor(private s: () => NoteBoiSettings) {}
 
   private getDriver(): Driver {
     const { neo4jUri, neo4jUser, neo4jPassword } = this.s();

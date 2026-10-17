@@ -1,10 +1,10 @@
 import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf } from "obsidian";
-import type GraphRecallPlugin from "../main";
+import type NoteBoiPlugin from "../main";
 import { buildPrompt, retrieve } from "./retrieve";
 import { GraphPanel } from "./graphView";
 import { Recorder } from "./voice";
 
-export const VIEW_TYPE = "graph-recall-chat";
+export const VIEW_TYPE = "noteboi-chat";
 
 export class ChatView extends ItemView {
   private log!: HTMLElement;
@@ -15,7 +15,7 @@ export class ChatView extends ItemView {
   private panels: GraphPanel[] = [];
   private busy = false;
 
-  constructor(leaf: WorkspaceLeaf, private plugin: GraphRecallPlugin) {
+  constructor(leaf: WorkspaceLeaf, private plugin: NoteBoiPlugin) {
     super(leaf);
   }
 
@@ -23,7 +23,7 @@ export class ChatView extends ItemView {
     return VIEW_TYPE;
   }
   getDisplayText() {
-    return "Graph Recall";
+    return "NoteBoi";
   }
   getIcon() {
     return "git-fork";
@@ -32,7 +32,7 @@ export class ChatView extends ItemView {
   async onOpen() {
     const root = this.contentEl;
     root.empty();
-    root.addClass("graph-recall");
+    root.addClass("noteboi");
 
     this.log = root.createDiv("gr-log");
     this.log.createDiv({

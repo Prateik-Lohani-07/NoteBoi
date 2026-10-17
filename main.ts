@@ -3,10 +3,10 @@ import { ChatView, VIEW_TYPE } from "./src/chatView";
 import { Indexer } from "./src/ingest";
 import { Llm } from "./src/llm";
 import { Graph } from "./src/neo4j";
-import { DEFAULT_SETTINGS, GraphRecallSettings, GraphRecallSettingTab } from "./src/settings";
+import { DEFAULT_SETTINGS, NoteBoiSettings, NoteBoiSettingTab } from "./src/settings";
 
-export default class GraphRecallPlugin extends Plugin {
-  settings!: GraphRecallSettings;
+export default class NoteBoiPlugin extends Plugin {
+  settings!: NoteBoiSettings;
   private _graph!: Graph;
   private _llm!: Llm;
   private indexer!: Indexer;
@@ -26,8 +26,8 @@ export default class GraphRecallPlugin extends Plugin {
     this.indexer = new Indexer(this.app, this._graph, this._llm, () => this.settings);
 
     this.registerView(VIEW_TYPE, (leaf) => new ChatView(leaf, this));
-    this.addRibbonIcon("git-fork", "Graph Recall", () => void this.activateView());
-    this.addSettingTab(new GraphRecallSettingTab(this.app, this));
+    this.addRibbonIcon("git-fork", "NoteBoi", () => void this.activateView());
+    this.addSettingTab(new NoteBoiSettingTab(this.app, this));
 
     this.addCommand({ id: "open-chat", name: "Open chat", callback: () => void this.activateView() });
     this.addCommand({ id: "index-vault", name: "Index vault", callback: () => void this.indexVault() });
@@ -87,8 +87,8 @@ export default class GraphRecallPlugin extends Plugin {
     try {
       await fn();
     } catch (e) {
-      console.error("Graph Recall:", e);
-      new Notice(`Graph Recall: ${(e as Error).message}`);
+      console.error("NoteBoi:", e);
+      new Notice(`NoteBoi: ${(e as Error).message}`);
     }
   }
 

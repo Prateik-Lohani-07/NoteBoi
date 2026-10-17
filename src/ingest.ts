@@ -1,7 +1,7 @@
 import { App, Notice, TFile } from "obsidian";
 import type { Graph } from "./neo4j";
 import type { Llm } from "./llm";
-import type { GraphRecallSettings } from "./settings";
+import type { NoteBoiSettings } from "./settings";
 
 export interface RawChunk {
   heading: string;
@@ -70,7 +70,7 @@ export class Indexer {
     private app: App,
     private graph: Graph,
     private llm: Llm,
-    private settings: () => GraphRecallSettings,
+    private settings: () => NoteBoiSettings,
   ) { }
 
   /** Serialises all graph writes so vault events and a full index never interleave. */
@@ -87,7 +87,7 @@ export class Indexer {
 
   indexVault(): Promise<void> {
     return this.enqueue(async () => {
-      const notice = new Notice("Graph Recall: preparing index…", 0);
+      const notice = new Notice("NoteBoi: preparing index…", 0);
       try {
         const rebuilt = await this.prepareSchema();
         const existing = rebuilt ? new Map<string, string>() : await this.graph.indexedHashes();
@@ -107,17 +107,17 @@ export class Indexer {
 
         let i = 0;
         for (const f of todo) {
-          notice.setMessage(`Graph Recall: indexing ${++i}/${todo.length}: ${f.basename}`);
+          notice.setMessage(`NoteBoi: indexing ${++i}/${todo.length}: ${f.basename}`);
           await this.indexFileRaw(f);
         }
         await this.pruneConcepts();
         notice.hide();
         new Notice(
-          `Graph Recall: indexed ${todo.length} note(s)${rebuilt ? " (full rebuild: embedding model changed)" : ""}.`,
+          `NoteBoi: indexed ${todo.length} note(s)${rebuilt ? " (full rebuild: embedding model changed)" : ""}.`,
         );
       } catch (e) {
         notice.hide();
-        new Notice(`Graph Recall: indexing failed: ${(e as Error).message}`, 10000);
+        new Notice(`NoteBoi: indexing failed: ${(e as Error).message}`, 10000);
         throw e;
       }
     });
@@ -166,7 +166,7 @@ export class Indexer {
     const embeddings = await this.llm.embed(chunks.map((c) => (c.heading ? `${c.heading}\n${c.text}` : c.text)));
     const { concepts, failed } = await this.extractConcepts(chunks);
     if (failed > 0) {
-      new Notice(`Graph Recall: concept extraction failed for ${failed} chunk(s) in ${file.basename}; it will be retried on the next index.`);
+      new Notice(`NoteBoi: concept extraction failed for ${failed} chunk(s) in ${file.basename}; it will be retried on the next index.`);
     }
     const rows = chunks.map((c, order) => ({
       id: `${path}#${order}`,
@@ -274,7 +274,7 @@ export class Indexer {
         const parsed = parseConcepts(reply);
         if (parsed) return parsed;
       } catch (e) {
-        console.warn("Graph Recall: concept extraction failed", e);
+        console.warn("NoteBoi: concept extraction failed", e);
       }
     }
     return null;

@@ -1,5 +1,5 @@
 {
-  "name": "obsidian-graph-recall",
+  "name": "obsidian-noteboi",
   "version": "0.1.0",
   "description": "GraphRAG over your Obsidian vault, powered by Neo4j",
   "main": "main.js",

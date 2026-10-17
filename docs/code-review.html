@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Graph Recall: code review guide</title>
+<html lang="en"><head><meta charset="utf-8"><title>NoteBoi: code review guide</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--bg:#0f1115;--panel:#171a21;--line:#262b36;--text:#e5e7eb;--mut:#9ca3af;--blue:#4c8bf5;--amber:#f59e0b;--green:#10b981}
@@ -26,7 +26,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 </style></head><body>
 <nav><b>Review order</b><a href="#src-retrieve-ts">1. src/retrieve.ts</a><a href="#src-ingest-ts">2. src/ingest.ts</a><a href="#src-neo4j-ts">3. src/neo4j.ts</a><a href="#src-chatView-ts">4. src/chatView.ts</a><a href="#src-llm-ts">5. src/llm.ts</a><a href="#src-settings-ts">6. src/settings.ts</a><a href="#main-ts">7. main.ts</a><a href="#src-graphView-ts">8. src/graphView.ts</a><a href="#src-voice-ts">9. src/voice.ts</a><b style="margin-top:14px">Other</b><a href="#config">config files</a></nav>
 <main>
-<h1>Graph Recall: code review guide</h1>
+<h1>NoteBoi: code review guide</h1>
 <p style="color:var(--mut)">Obsidian plugin: GraphRAG over your vault on Neo4j. Generated from the live source. Files are ordered by how much they matter to the demo.</p>
 
 <div class="warn"><b>Status:</b> tested against a real Neo4j 5 with a scripted harness (schema, ingest, hybrid retrieval, graph expansion, re-index, delete, embedding-model switch), with Ollama (gemma3:1b) and OpenAI (gpt-4o-mini), and manually in Obsidian. <b>Not yet tested:</b> the microphone button, Neo4j Aura, mobile (unsupported). Known weakness: graph expansion can add loosely related chunks in small vaults (no relevance cutoff yet).</div>
@@ -252,7 +252,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
   <details><summary>Full source</summary><pre><code><span id="src-ingest-ts-L1"><i>1</i>import { App, Notice, TFile } from "obsidian";</span>
 <span id="src-ingest-ts-L2"><i>2</i>import type { Graph } from "./neo4j";</span>
 <span id="src-ingest-ts-L3"><i>3</i>import type { Llm } from "./llm";</span>
-<span id="src-ingest-ts-L4"><i>4</i>import type { GraphRecallSettings } from "./settings";</span>
+<span id="src-ingest-ts-L4"><i>4</i>import type { NoteBoiSettings } from "./settings";</span>
 <span id="src-ingest-ts-L5"><i>5</i> </span>
 <span id="src-ingest-ts-L6"><i>6</i>export interface RawChunk {</span>
 <span id="src-ingest-ts-L7"><i>7</i>  heading: string;</span>
@@ -321,7 +321,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-ingest-ts-L70"><i>70</i>    private app: App,</span>
 <span id="src-ingest-ts-L71"><i>71</i>    private graph: Graph,</span>
 <span id="src-ingest-ts-L72"><i>72</i>    private llm: Llm,</span>
-<span id="src-ingest-ts-L73"><i>73</i>    private settings: () =&gt; GraphRecallSettings,</span>
+<span id="src-ingest-ts-L73"><i>73</i>    private settings: () =&gt; NoteBoiSettings,</span>
 <span id="src-ingest-ts-L74"><i>74</i>  ) { }</span>
 <span id="src-ingest-ts-L75"><i>75</i> </span>
 <span id="src-ingest-ts-L76"><i>76</i>  /** Serialises all graph writes so vault events and a full index never interleave. */</span>
@@ -338,7 +338,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-ingest-ts-L87"><i>87</i> </span>
 <span id="src-ingest-ts-L88"><i>88</i>  indexVault(): Promise&lt;void&gt; {</span>
 <span id="src-ingest-ts-L89"><i>89</i>    return this.enqueue(async () =&gt; {</span>
-<span id="src-ingest-ts-L90"><i>90</i>      const notice = new Notice("Graph Recall: preparing index…", 0);</span>
+<span id="src-ingest-ts-L90"><i>90</i>      const notice = new Notice("NoteBoi: preparing index…", 0);</span>
 <span id="src-ingest-ts-L91"><i>91</i>      try {</span>
 <span id="src-ingest-ts-L92"><i>92</i>        const rebuilt = await this.prepareSchema();</span>
 <span id="src-ingest-ts-L93"><i>93</i>        const existing = rebuilt ? new Map&lt;string, string&gt;() : await this.graph.indexedHashes();</span>
@@ -358,17 +358,17 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-ingest-ts-L107"><i>107</i> </span>
 <span id="src-ingest-ts-L108"><i>108</i>        let i = 0;</span>
 <span id="src-ingest-ts-L109"><i>109</i>        for (const f of todo) {</span>
-<span id="src-ingest-ts-L110"><i>110</i>          notice.setMessage(`Graph Recall: indexing ${++i}/${todo.length}: ${f.basename}`);</span>
+<span id="src-ingest-ts-L110"><i>110</i>          notice.setMessage(`NoteBoi: indexing ${++i}/${todo.length}: ${f.basename}`);</span>
 <span id="src-ingest-ts-L111"><i>111</i>          await this.indexFileRaw(f);</span>
 <span id="src-ingest-ts-L112"><i>112</i>        }</span>
 <span id="src-ingest-ts-L113"><i>113</i>        await this.pruneConcepts();</span>
 <span id="src-ingest-ts-L114"><i>114</i>        notice.hide();</span>
 <span id="src-ingest-ts-L115"><i>115</i>        new Notice(</span>
-<span id="src-ingest-ts-L116"><i>116</i>          `Graph Recall: indexed ${todo.length} note(s)${rebuilt ? " (full rebuild: embedding model changed)" : ""}.`,</span>
+<span id="src-ingest-ts-L116"><i>116</i>          `NoteBoi: indexed ${todo.length} note(s)${rebuilt ? " (full rebuild: embedding model changed)" : ""}.`,</span>
 <span id="src-ingest-ts-L117"><i>117</i>        );</span>
 <span id="src-ingest-ts-L118"><i>118</i>      } catch (e) {</span>
 <span id="src-ingest-ts-L119"><i>119</i>        notice.hide();</span>
-<span id="src-ingest-ts-L120"><i>120</i>        new Notice(`Graph Recall: indexing failed: ${(e as Error).message}`, 10000);</span>
+<span id="src-ingest-ts-L120"><i>120</i>        new Notice(`NoteBoi: indexing failed: ${(e as Error).message}`, 10000);</span>
 <span id="src-ingest-ts-L121"><i>121</i>        throw e;</span>
 <span id="src-ingest-ts-L122"><i>122</i>      }</span>
 <span id="src-ingest-ts-L123"><i>123</i>    });</span>
@@ -417,7 +417,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-ingest-ts-L166"><i>166</i>    const embeddings = await this.llm.embed(chunks.map((c) =&gt; (c.heading ? `${c.heading}\n${c.text}` : c.text)));</span>
 <span id="src-ingest-ts-L167"><i>167</i>    const { concepts, failed } = await this.extractConcepts(chunks);</span>
 <span id="src-ingest-ts-L168"><i>168</i>    if (failed &gt; 0) {</span>
-<span id="src-ingest-ts-L169"><i>169</i>      new Notice(`Graph Recall: concept extraction failed for ${failed} chunk(s) in ${file.basename}; it will be retried on the next index.`);</span>
+<span id="src-ingest-ts-L169"><i>169</i>      new Notice(`NoteBoi: concept extraction failed for ${failed} chunk(s) in ${file.basename}; it will be retried on the next index.`);</span>
 <span id="src-ingest-ts-L170"><i>170</i>    }</span>
 <span id="src-ingest-ts-L171"><i>171</i>    const rows = chunks.map((c, order) =&gt; ({</span>
 <span id="src-ingest-ts-L172"><i>172</i>      id: `${path}#${order}`,</span>
@@ -525,7 +525,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-ingest-ts-L274"><i>274</i>        const parsed = parseConcepts(reply);</span>
 <span id="src-ingest-ts-L275"><i>275</i>        if (parsed) return parsed;</span>
 <span id="src-ingest-ts-L276"><i>276</i>      } catch (e) {</span>
-<span id="src-ingest-ts-L277"><i>277</i>        console.warn("Graph Recall: concept extraction failed", e);</span>
+<span id="src-ingest-ts-L277"><i>277</i>        console.warn("NoteBoi: concept extraction failed", e);</span>
 <span id="src-ingest-ts-L278"><i>278</i>      }</span>
 <span id="src-ingest-ts-L279"><i>279</i>    }</span>
 <span id="src-ingest-ts-L280"><i>280</i>    return null;</span>
@@ -568,7 +568,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
   <div class="box say"><h4>Say this when explaining</h4><ul><li>Switching Ollama to OpenAI changes the embedding dimension (768 vs 1536). The schema layer detects that and rebuilds, so the demo can't silently return garbage.</li></ul></div>
   <div class="box watch"><h4>Honest caveats</h4><ul><li>The wipe on model change is automatic, with no confirmation dialog.</li><li>Uses elementId(), which needs Neo4j 5.</li></ul></div>
   <details><summary>Full source</summary><pre><code><span id="src-neo4j-ts-L1"><i>1</i>import neo4j, { Driver, Record as Neo4jRecord } from "neo4j-driver";</span>
-<span id="src-neo4j-ts-L2"><i>2</i>import type { GraphRecallSettings } from "./settings";</span>
+<span id="src-neo4j-ts-L2"><i>2</i>import type { NoteBoiSettings } from "./settings";</span>
 <span id="src-neo4j-ts-L3"><i>3</i> </span>
 <span id="src-neo4j-ts-L4"><i>4</i>const OUR_LABELS = ["Note", "Chunk", "Concept", "Tag", "Meta"];</span>
 <span id="src-neo4j-ts-L5"><i>5</i> </span>
@@ -577,7 +577,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-neo4j-ts-L8"><i>8</i>  private driver: Driver | null = null;</span>
 <span id="src-neo4j-ts-L9"><i>9</i>  private key = "";</span>
 <span id="src-neo4j-ts-L10"><i>10</i> </span>
-<span id="src-neo4j-ts-L11"><i>11</i>  constructor(private s: () =&gt; GraphRecallSettings) {}</span>
+<span id="src-neo4j-ts-L11"><i>11</i>  constructor(private s: () =&gt; NoteBoiSettings) {}</span>
 <span id="src-neo4j-ts-L12"><i>12</i> </span>
 <span id="src-neo4j-ts-L13"><i>13</i>  private getDriver(): Driver {</span>
 <span id="src-neo4j-ts-L14"><i>14</i>    const { neo4jUri, neo4jUser, neo4jPassword } = this.s();</span>
@@ -669,12 +669,12 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
   <div class="box say"><h4>Say this when explaining</h4><ul><li>Click any node in the graph and the note opens at that heading. The answer, the evidence and the source are all one click apart.</li></ul></div>
   <div class="box watch"><h4>Honest caveats</h4><ul><li>Mic button only exists if an STT URL is configured.</li><li>Uses innerHTML for a static legend string only; no user content goes through it.</li></ul></div>
   <details><summary>Full source</summary><pre><code><span id="src-chatView-ts-L1"><i>1</i>import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf } from "obsidian";</span>
-<span id="src-chatView-ts-L2"><i>2</i>import type GraphRecallPlugin from "../main";</span>
+<span id="src-chatView-ts-L2"><i>2</i>import type NoteBoiPlugin from "../main";</span>
 <span id="src-chatView-ts-L3"><i>3</i>import { buildPrompt, retrieve } from "./retrieve";</span>
 <span id="src-chatView-ts-L4"><i>4</i>import { GraphPanel } from "./graphView";</span>
 <span id="src-chatView-ts-L5"><i>5</i>import { Recorder } from "./voice";</span>
 <span id="src-chatView-ts-L6"><i>6</i> </span>
-<span id="src-chatView-ts-L7"><i>7</i>export const VIEW_TYPE = "graph-recall-chat";</span>
+<span id="src-chatView-ts-L7"><i>7</i>export const VIEW_TYPE = "noteboi-chat";</span>
 <span id="src-chatView-ts-L8"><i>8</i> </span>
 <span id="src-chatView-ts-L9"><i>9</i>export class ChatView extends ItemView {</span>
 <span id="src-chatView-ts-L10"><i>10</i>  private log!: HTMLElement;</span>
@@ -685,7 +685,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-chatView-ts-L15"><i>15</i>  private panels: GraphPanel[] = [];</span>
 <span id="src-chatView-ts-L16"><i>16</i>  private busy = false;</span>
 <span id="src-chatView-ts-L17"><i>17</i> </span>
-<span id="src-chatView-ts-L18"><i>18</i>  constructor(leaf: WorkspaceLeaf, private plugin: GraphRecallPlugin) {</span>
+<span id="src-chatView-ts-L18"><i>18</i>  constructor(leaf: WorkspaceLeaf, private plugin: NoteBoiPlugin) {</span>
 <span id="src-chatView-ts-L19"><i>19</i>    super(leaf);</span>
 <span id="src-chatView-ts-L20"><i>20</i>  }</span>
 <span id="src-chatView-ts-L21"><i>21</i> </span>
@@ -693,7 +693,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-chatView-ts-L23"><i>23</i>    return VIEW_TYPE;</span>
 <span id="src-chatView-ts-L24"><i>24</i>  }</span>
 <span id="src-chatView-ts-L25"><i>25</i>  getDisplayText() {</span>
-<span id="src-chatView-ts-L26"><i>26</i>    return "Graph Recall";</span>
+<span id="src-chatView-ts-L26"><i>26</i>    return "NoteBoi";</span>
 <span id="src-chatView-ts-L27"><i>27</i>  }</span>
 <span id="src-chatView-ts-L28"><i>28</i>  getIcon() {</span>
 <span id="src-chatView-ts-L29"><i>29</i>    return "git-fork";</span>
@@ -702,7 +702,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-chatView-ts-L32"><i>32</i>  async onOpen() {</span>
 <span id="src-chatView-ts-L33"><i>33</i>    const root = this.contentEl;</span>
 <span id="src-chatView-ts-L34"><i>34</i>    root.empty();</span>
-<span id="src-chatView-ts-L35"><i>35</i>    root.addClass("graph-recall");</span>
+<span id="src-chatView-ts-L35"><i>35</i>    root.addClass("noteboi");</span>
 <span id="src-chatView-ts-L36"><i>36</i> </span>
 <span id="src-chatView-ts-L37"><i>37</i>    this.log = root.createDiv("gr-log");</span>
 <span id="src-chatView-ts-L38"><i>38</i>    this.log.createDiv({</span>
@@ -830,7 +830,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
   <div class="box focus"><h4>Focus here</h4><ul><li><a href="#src-llm-ts-L31">L31</a> Batches inputs 32 at a time to /embeddings.</li><li><a href="#src-llm-ts-L47">L47</a> Non-streaming returns JSON; streaming parses Server-Sent Events. response_format json_object and max_tokens are used for concept extraction (max_tokens stops small models looping until the server aborts).</li><li><a href="#src-llm-ts-L100">L100</a> Multipart upload to /audio/transcriptions.</li></ul></div>
   <div class="box say"><h4>Say this when explaining</h4><ul><li>Ollama exposes an OpenAI-compatible API, so provider switching is only a base URL, a key and model names. No framework required.</li></ul></div>
   <div class="box watch"><h4>Honest caveats</h4><ul><li>Uses fetch, so it relies on the provider allowing Obsidian's app:// origin (CORS). I believe Ollama's defaults allow it, but that is unverified here.</li><li>Whether local models honour response_format json_object varies; parsing is defensive.</li></ul></div>
-  <details><summary>Full source</summary><pre><code><span id="src-llm-ts-L1"><i>1</i>import type { GraphRecallSettings } from "./settings";</span>
+  <details><summary>Full source</summary><pre><code><span id="src-llm-ts-L1"><i>1</i>import type { NoteBoiSettings } from "./settings";</span>
 <span id="src-llm-ts-L2"><i>2</i> </span>
 <span id="src-llm-ts-L3"><i>3</i>export interface ChatMessage {</span>
 <span id="src-llm-ts-L4"><i>4</i>  role: "system" | "user" | "assistant";</span>
@@ -847,7 +847,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-llm-ts-L15"><i>15</i> </span>
 <span id="src-llm-ts-L16"><i>16</i>/** Thin client for any OpenAI-compatible API (Ollama exposes one at /v1). */</span>
 <span id="src-llm-ts-L17"><i>17</i>export class Llm {</span>
-<span id="src-llm-ts-L18"><i>18</i>  constructor(private s: () =&gt; GraphRecallSettings) {}</span>
+<span id="src-llm-ts-L18"><i>18</i>  constructor(private s: () =&gt; NoteBoiSettings) {}</span>
 <span id="src-llm-ts-L19"><i>19</i> </span>
 <span id="src-llm-ts-L20"><i>20</i>  private headers(extra: Record&lt;string, string&gt; = {}) {</span>
 <span id="src-llm-ts-L21"><i>21</i>    const { apiKey } = this.s();</span>
@@ -948,11 +948,11 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
   <div class="box say"><h4>Say this when explaining</h4><ul><li>Local-first by default (Ollama + Docker Neo4j). One dropdown flips the same plugin to OpenAI for the live demo.</li></ul></div>
   <div class="box watch"><h4>Honest caveats</h4><ul><li>Secrets are stored in plain text in the vault's data.json.</li><li>No confirmation before an embedding-model change triggers a rebuild.</li></ul></div>
   <details><summary>Full source</summary><pre><code><span id="src-settings-ts-L1"><i>1</i>import { App, Notice, PluginSettingTab, Setting } from "obsidian";</span>
-<span id="src-settings-ts-L2"><i>2</i>import type GraphRecallPlugin from "../main";</span>
+<span id="src-settings-ts-L2"><i>2</i>import type NoteBoiPlugin from "../main";</span>
 <span id="src-settings-ts-L3"><i>3</i> </span>
 <span id="src-settings-ts-L4"><i>4</i>export type Provider = "ollama" | "openai" | "custom";</span>
 <span id="src-settings-ts-L5"><i>5</i> </span>
-<span id="src-settings-ts-L6"><i>6</i>export interface GraphRecallSettings {</span>
+<span id="src-settings-ts-L6"><i>6</i>export interface NoteBoiSettings {</span>
 <span id="src-settings-ts-L7"><i>7</i>  provider: Provider;</span>
 <span id="src-settings-ts-L8"><i>8</i>  baseURL: string;</span>
 <span id="src-settings-ts-L9"><i>9</i>  apiKey: string;</span>
@@ -968,7 +968,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-settings-ts-L19"><i>19</i>}</span>
 <span id="src-settings-ts-L20"><i>20</i> </span>
 <span id="src-settings-ts-L21"><i>21</i>type Preset = Pick&lt;</span>
-<span id="src-settings-ts-L22"><i>22</i>  GraphRecallSettings,</span>
+<span id="src-settings-ts-L22"><i>22</i>  NoteBoiSettings,</span>
 <span id="src-settings-ts-L23"><i>23</i>  "baseURL" | "apiKey" | "chatModel" | "embedModel" | "sttBaseURL" | "sttModel"</span>
 <span id="src-settings-ts-L24"><i>24</i>&gt;;</span>
 <span id="src-settings-ts-L25"><i>25</i> </span>
@@ -992,7 +992,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-settings-ts-L43" class="hot"><i>43</i>  },</span>
 <span id="src-settings-ts-L44"><i>44</i>};</span>
 <span id="src-settings-ts-L45"><i>45</i> </span>
-<span id="src-settings-ts-L46"><i>46</i>export const DEFAULT_SETTINGS: GraphRecallSettings = {</span>
+<span id="src-settings-ts-L46"><i>46</i>export const DEFAULT_SETTINGS: NoteBoiSettings = {</span>
 <span id="src-settings-ts-L47"><i>47</i>  provider: "ollama",</span>
 <span id="src-settings-ts-L48"><i>48</i>  ...PRESETS.ollama,</span>
 <span id="src-settings-ts-L49"><i>49</i>  neo4jUri: "bolt://localhost:7687",</span>
@@ -1002,8 +1002,8 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-settings-ts-L53"><i>53</i>  autoIndex: true,</span>
 <span id="src-settings-ts-L54"><i>54</i>};</span>
 <span id="src-settings-ts-L55"><i>55</i> </span>
-<span id="src-settings-ts-L56"><i>56</i>export class GraphRecallSettingTab extends PluginSettingTab {</span>
-<span id="src-settings-ts-L57"><i>57</i>  constructor(app: App, private plugin: GraphRecallPlugin) {</span>
+<span id="src-settings-ts-L56"><i>56</i>export class NoteBoiSettingTab extends PluginSettingTab {</span>
+<span id="src-settings-ts-L57"><i>57</i>  constructor(app: App, private plugin: NoteBoiPlugin) {</span>
 <span id="src-settings-ts-L58"><i>58</i>    super(app, plugin);</span>
 <span id="src-settings-ts-L59"><i>59</i>  }</span>
 <span id="src-settings-ts-L60"><i>60</i> </span>
@@ -1034,7 +1034,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="src-settings-ts-L85" class="hot"><i>85</i>          }),</span>
 <span id="src-settings-ts-L86"><i>86</i>      );</span>
 <span id="src-settings-ts-L87"><i>87</i> </span>
-<span id="src-settings-ts-L88" class="hot"><i>88</i>    const text = (name: string, key: keyof GraphRecallSettings, desc = "", secret = false) =&gt;</span>
+<span id="src-settings-ts-L88" class="hot"><i>88</i>    const text = (name: string, key: keyof NoteBoiSettings, desc = "", secret = false) =&gt;</span>
 <span id="src-settings-ts-L89" class="hot"><i>89</i>      new Setting(containerEl)</span>
 <span id="src-settings-ts-L90" class="hot"><i>90</i>        .setName(name)</span>
 <span id="src-settings-ts-L91" class="hot"><i>91</i>        .setDesc(desc)</span>
@@ -1117,10 +1117,10 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="main-ts-L3"><i>3</i>import { Indexer } from "./src/ingest";</span>
 <span id="main-ts-L4"><i>4</i>import { Llm } from "./src/llm";</span>
 <span id="main-ts-L5"><i>5</i>import { Graph } from "./src/neo4j";</span>
-<span id="main-ts-L6"><i>6</i>import { DEFAULT_SETTINGS, GraphRecallSettings, GraphRecallSettingTab } from "./src/settings";</span>
+<span id="main-ts-L6"><i>6</i>import { DEFAULT_SETTINGS, NoteBoiSettings, NoteBoiSettingTab } from "./src/settings";</span>
 <span id="main-ts-L7"><i>7</i> </span>
-<span id="main-ts-L8"><i>8</i>export default class GraphRecallPlugin extends Plugin {</span>
-<span id="main-ts-L9"><i>9</i>  settings!: GraphRecallSettings;</span>
+<span id="main-ts-L8"><i>8</i>export default class NoteBoiPlugin extends Plugin {</span>
+<span id="main-ts-L9"><i>9</i>  settings!: NoteBoiSettings;</span>
 <span id="main-ts-L10"><i>10</i>  private _graph!: Graph;</span>
 <span id="main-ts-L11"><i>11</i>  private _llm!: Llm;</span>
 <span id="main-ts-L12"><i>12</i>  private indexer!: Indexer;</span>
@@ -1140,8 +1140,8 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="main-ts-L26"><i>26</i>    this.indexer = new Indexer(this.app, this._graph, this._llm, () =&gt; this.settings);</span>
 <span id="main-ts-L27"><i>27</i> </span>
 <span id="main-ts-L28"><i>28</i>    this.registerView(VIEW_TYPE, (leaf) =&gt; new ChatView(leaf, this));</span>
-<span id="main-ts-L29"><i>29</i>    this.addRibbonIcon("git-fork", "Graph Recall", () =&gt; void this.activateView());</span>
-<span id="main-ts-L30"><i>30</i>    this.addSettingTab(new GraphRecallSettingTab(this.app, this));</span>
+<span id="main-ts-L29"><i>29</i>    this.addRibbonIcon("git-fork", "NoteBoi", () =&gt; void this.activateView());</span>
+<span id="main-ts-L30"><i>30</i>    this.addSettingTab(new NoteBoiSettingTab(this.app, this));</span>
 <span id="main-ts-L31"><i>31</i> </span>
 <span id="main-ts-L32"><i>32</i>    this.addCommand({ id: "open-chat", name: "Open chat", callback: () =&gt; void this.activateView() });</span>
 <span id="main-ts-L33"><i>33</i>    this.addCommand({ id: "index-vault", name: "Index vault", callback: () =&gt; void this.indexVault() });</span>
@@ -1201,8 +1201,8 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 <span id="main-ts-L87"><i>87</i>    try {</span>
 <span id="main-ts-L88"><i>88</i>      await fn();</span>
 <span id="main-ts-L89"><i>89</i>    } catch (e) {</span>
-<span id="main-ts-L90"><i>90</i>      console.error("Graph Recall:", e);</span>
-<span id="main-ts-L91"><i>91</i>      new Notice(`Graph Recall: ${(e as Error).message}`);</span>
+<span id="main-ts-L90"><i>90</i>      console.error("NoteBoi:", e);</span>
+<span id="main-ts-L91"><i>91</i>      new Notice(`NoteBoi: ${(e as Error).message}`);</span>
 <span id="main-ts-L92"><i>92</i>    }</span>
 <span id="main-ts-L93"><i>93</i>  }</span>
 <span id="main-ts-L94"><i>94</i> </span>
@@ -1354,7 +1354,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 </section>
 
 <section id="config" class="card"><h2>Config files</h2><details><summary>package.json</summary><pre><code>{
-  "name": "obsidian-graph-recall",
+  "name": "obsidian-noteboi",
   "version": "0.1.0",
   "description": "GraphRAG over your Obsidian vault, powered by Neo4j",
   "main": "main.js",
@@ -1378,8 +1378,8 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 }
 </code></pre></details>
 <details><summary>manifest.json</summary><pre><code>{
-  "id": "graph-recall",
-  "name": "Graph Recall",
+  "id": "noteboi",
+  "name": "NoteBoi",
   "version": "0.1.0",
   "minAppVersion": "1.5.0",
   "description": "Ask your vault questions. GraphRAG over your notes, powered by Neo4j, with a visual answer subgraph.",
@@ -1395,7 +1395,7 @@ import { join } from "node:path";
 const production = process.argv[2] === "production";
 
 // Obsidian loads main.js, manifest.json and styles.css from the plugin's folder.
-// Point OBSIDIAN_PLUGIN_DIR at &lt;vault&gt;/.obsidian/plugins/graph-recall to build straight into a vault;
+// Point OBSIDIAN_PLUGIN_DIR at &lt;vault&gt;/.obsidian/plugins/noteboi to build straight into a vault;
 // otherwise output goes to ./dist so the repo root stays free of generated files.
 const outDir = process.env.OBSIDIAN_PLUGIN_DIR || "dist";
 
@@ -1447,7 +1447,7 @@ if (production) {
 volumes:
   neo4j-data:
 </code></pre></details>
-<details><summary>styles.css</summary><pre><code>.graph-recall { display: flex; flex-direction: column; height: 100%; padding: 8px; gap: 8px; }
+<details><summary>styles.css</summary><pre><code>.noteboi { display: flex; flex-direction: column; height: 100%; padding: 8px; gap: 8px; }
 .gr-log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
 .gr-hint { color: var(--text-muted); font-size: var(--font-ui-small); }
 .gr-msg { padding: 8px 10px; border-radius: 8px; }

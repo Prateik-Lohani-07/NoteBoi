@@ -6,7 +6,7 @@ import { join } from "node:path";
 const production = process.argv[2] === "production";
 
 // Obsidian loads main.js, manifest.json and styles.css from the plugin's folder.
-// Point OBSIDIAN_PLUGIN_DIR at <vault>/.obsidian/plugins/graph-recall to build straight into a vault;
+// Point OBSIDIAN_PLUGIN_DIR at <vault>/.obsidian/plugins/noteboi to build straight into a vault;
 // otherwise output goes to ./dist so the repo root stays free of generated files.
 const outDir = process.env.OBSIDIAN_PLUGIN_DIR || "dist";
 
